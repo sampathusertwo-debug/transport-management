@@ -6,6 +6,12 @@ from typing import Dict, List
 
 def show():
     """Display the customer payments module"""
+    # Load data when needed
+    from database import load_data_when_needed
+    load_data_when_needed('invoices')
+    load_data_when_needed('customer_payments')
+    load_data_when_needed('customers')
+    
     st.header("💰 Customer Payments Management")
     
     tab1, tab2, tab3, tab4 = st.tabs(["Record Payment", "View Payments", "Customer Statements", "Outstanding Reports"])
@@ -114,16 +120,26 @@ def record_invoice_payment(invoice):
             'created_by': 'Admin'
         }
         
-        st.session_state.customer_payments.append(payment)
-        
-        # Update invoice outstanding
-        invoice['outstanding_amount'] -= payment_amount
-        
-        # Update invoice status
-        if invoice['outstanding_amount'] <= 0:
-            invoice['status'] = 'Paid'
+        # Save to database
+        from app import save_payment
+        if save_payment(payment):
+            # Add to session state for immediate display
+            if 'customer_payments' not in st.session_state:
+                st.session_state.customer_payments = []
+            st.session_state.customer_payments.append(payment)
+            
+            # Update invoice outstanding
+            invoice['outstanding_amount'] -= payment_amount
+            
+            # Update invoice status
+            if invoice['outstanding_amount'] <= 0:
+                invoice['status'] = 'Paid'
+            else:
+                invoice['status'] = 'Partially Paid'
+                
+            st.success(f"Payment of ₹{payment_amount:,.2f} recorded successfully!")
         else:
-            invoice['status'] = 'Partially Paid'
+            st.error("Failed to save payment. Please try again.")
         
         # Clear selected invoice
         if 'selected_invoice_id' in st.session_state:
@@ -276,12 +292,18 @@ def record_manual_payment():
             'created_by': 'Admin'
         }
         
-        st.session_state.customer_payments.append(payment)
-        
-        # Update invoice outstanding if allocated
-        if allocation_type == "Allocate to specific invoices":
-            for inv in customer_invoices:
-                allocate_amount = st.session_state.get(f"allocate_{inv['id']}", 0.0)
+        # Save to database
+        from app import save_payment
+        if save_payment(payment):
+            # Add to session state for immediate display
+            if 'customer_payments' not in st.session_state:
+                st.session_state.customer_payments = []
+            st.session_state.customer_payments.append(payment)
+            
+            # Update invoice outstanding if allocated
+            if allocation_type == "Allocate to specific invoices":
+                for inv in customer_invoices:
+                    allocate_amount = st.session_state.get(f"allocate_{inv['id']}", 0.0)
                 if allocate_amount > 0:
                     inv['outstanding_amount'] -= allocate_amount
                     
@@ -290,15 +312,17 @@ def record_manual_payment():
                         inv['status'] = 'Paid'
                     else:
                         inv['status'] = 'Partially Paid'
-        
-        st.success(f"Payment of ₹{payment_amount:,.2f} recorded successfully!")
-        
-        # Clear form
-        for key in st.session_state.keys():
-            if key.startswith('manual_payment_') or key.startswith('allocate_'):
-                del st.session_state[key]
-        
-        st.rerun()
+            
+            st.success(f"Payment of ₹{payment_amount:,.2f} recorded successfully!")
+            
+            # Clear form
+            for key in st.session_state.keys():
+                if key.startswith('manual_payment_') or key.startswith('allocate_'):
+                    del st.session_state[key]
+            
+            st.rerun()
+        else:
+            st.error("Failed to save payment. Please try again.")
 
 def view_payments():
     """View and manage payments"""

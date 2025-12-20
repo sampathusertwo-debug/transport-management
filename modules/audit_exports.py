@@ -99,7 +99,11 @@ def show():
 
 def preview_data_counts(from_date, to_date):
     """Preview data counts for the selected period"""
-    st.markdown("### 📊 Data Preview")
+    st.markdown('''
+    <div class="section-header">
+        📊 Data Preview
+    </div>
+    ''', unsafe_allow_html=True)
     
     # Calculate counts
     bookings_count = len([b for b in st.session_state.bookings 

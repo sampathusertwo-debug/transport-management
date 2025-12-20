@@ -2,360 +2,336 @@ import streamlit as st
 import pandas as pd
 import datetime
 from datetime import timedelta
+from .quotations import safe_get_date
 
 def show():
     """Display the dashboard module"""
-    st.header("📊 Dashboard")
+    # Load only dashboard-relevant data when needed
+    from database import load_data_when_needed
     
-    # Date filters
-    col1, col2, col3 = st.columns(3)
+    # Load minimal data needed for dashboard
+    bookings = load_data_when_needed('bookings')
+    invoices = load_data_when_needed('invoices')
     
+    # Period filter
+    col1, col2 = st.columns([3, 1])
     with col1:
+        st.markdown('''
+        <div style="margin-bottom: 1rem;">
+            <span style="color: #64748b; font-weight: 500; margin-right: 1rem;">Period:</span>
+        </div>
+        ''', unsafe_allow_html=True)
+    
+    with col2:
         period_type = st.selectbox(
             "Period Type",
-            ["Day-wise", "Month-wise", "Year-wise"],
-            key="dashboard_period_type"
+            ["This Month", "Last Month", "This Year", "Custom Range"],
+            key="dashboard_period_type",
+            label_visibility="collapsed"
         )
     
-    # Calculate date ranges based on period type
+    # Calculate metrics
     today = datetime.date.today()
-    
-    if period_type == "Day-wise":
-        from_date = st.date_input("From Date", today, key="dashboard_from_date")
-        to_date = st.date_input("To Date", today, key="dashboard_to_date")
-    elif period_type == "Month-wise":
+    if period_type == "This Month":
         from_date = datetime.date(today.year, today.month, 1)
         to_date = today
-        with col2:
-            st.info(f"Current Month: {from_date.strftime('%B %Y')}")
-    else:  # Year-wise
+    elif period_type == "Last Month":
+        last_month = today.replace(day=1) - timedelta(days=1)
+        from_date = datetime.date(last_month.year, last_month.month, 1)
+        to_date = last_month
+    elif period_type == "This Year":
         from_date = datetime.date(today.year, 1, 1)
         to_date = today
+    else:  # Custom Range
+        col1, col2 = st.columns(2)
+        with col1:
+            from_date = st.date_input("From Date", today - timedelta(days=30), key="dashboard_from_date")
         with col2:
-            st.info(f"Current Year: {today.year}")
+            to_date = st.date_input("To Date", today, key="dashboard_to_date")
     
-    with col3:
-        if st.button("Refresh Dashboard", type="primary"):
-            st.rerun()
-    
-    # Calculate metrics based on selected period
+    # Calculate dashboard metrics
     metrics = calculate_dashboard_metrics(from_date, to_date)
     
-    # Display KPI cards
-    display_kpi_cards(metrics)
+    # Display modern metric cards
+    display_modern_metric_cards(metrics)
     
-    # Display charts
-    display_charts(metrics, period_type, from_date, to_date)
-    
-    # Display detailed tables
+    # Display recent bookings table
+    display_recent_bookings_table(from_date, to_date)
+
+    # Customer Outstanding Report
+    display_customer_outstanding_report()
     display_detailed_data(from_date, to_date)
 
 def calculate_dashboard_metrics(from_date, to_date):
-    """Calculate dashboard metrics for the selected period"""
-    
-    # Filter data by date range
-    period_bookings = [
+    """Calculate dashboard metrics for the given date range"""
+    # Filter data by date range with safe date conversion
+    filtered_bookings = [
         b for b in st.session_state.bookings 
-        if from_date <= b['pickup_date'] <= to_date
+        if from_date <= safe_get_date(b.get('created_date', datetime.datetime.now())) <= to_date
     ]
     
-    period_invoices = [
-        inv for inv in st.session_state.invoices 
-        if from_date <= inv['invoice_date'] <= to_date
+    filtered_invoices = [
+        i for i in st.session_state.invoices 
+        if from_date <= safe_get_date(i.get('created_date', datetime.datetime.now())) <= to_date
     ]
     
-    period_payments = [
+    filtered_payments = [
         p for p in st.session_state.customer_payments 
-        if from_date <= p['payment_date'] <= to_date
-    ]
-    
-    period_fuel_logs = [
-        f for f in st.session_state.fuel_logs 
-        if from_date <= f['date'] <= to_date
+        if from_date <= safe_get_date(p.get('created_date', datetime.datetime.now())) <= to_date
     ]
     
     # Calculate metrics
-    metrics = {
-        'total_bookings': len(period_bookings),
-        'confirmed_bookings': len([b for b in period_bookings if b['status'] not in ['Cancelled']]),
-        'delivered_bookings': len([b for b in period_bookings if b['status'] in ['Delivered', 'POD Captured']]),
-        'cancelled_bookings': len([b for b in period_bookings if b['status'] == 'Cancelled']),
-        
-        'total_invoices': len(period_invoices),
-        'gst_invoices': len([inv for inv in period_invoices if inv['invoice_type'] == 'GST Invoice']),
-        'cash_invoices': len([inv for inv in period_invoices if inv['invoice_type'] == 'Cash Invoice']),
-        'contract_invoices': len([inv for inv in period_invoices if inv['invoice_type'] == 'Contract Invoice']),
-        
-        'pending_billings': len([b for b in period_bookings if b['status'] == 'POD Captured' and 
-                               not any(inv.get('booking_id') == b['id'] for inv in st.session_state.invoices)]),
-        
-        'total_revenue': sum(inv['total_amount'] for inv in period_invoices),
-        'total_receipts': sum(p['payment_amount'] for p in period_payments),
-        
-        'outstanding_amount': sum(inv['outstanding_amount'] for inv in st.session_state.invoices),
-        
-        'fuel_consumption': sum(f['liters'] for f in period_fuel_logs),
-        'fuel_cost': sum(f['cost'] for f in period_fuel_logs),
-        
-        'active_vehicles': len([v for v in st.session_state.vehicles if v.get('status') == 'Active']),
-        'available_drivers': len([d for d in st.session_state.drivers if d.get('status') == 'Available']),
-        
-        # Cash and carry movements
-        'cash_carry_movements': len([b for b in period_bookings if b.get('trip_type') == 'Local' and 
-                                   any(inv.get('booking_id') == b['id'] and inv['invoice_type'] == 'Cash Invoice' 
-                                       for inv in period_invoices)])
+    total_bookings = len(filtered_bookings)
+    total_revenue = sum(booking['total_amount'] for booking in filtered_bookings)
+    total_receipts = sum(payment['amount'] for payment in filtered_payments)
+    
+    # Calculate pending billings (bookings that are delivered but not invoiced)
+    pending_billings = len([
+        b for b in filtered_bookings 
+        if b.get('status') in ['Delivered', 'POD Generated'] and 
+        not any(i['booking_id'] == b['id'] for i in st.session_state.invoices)
+    ])
+    
+    return {
+        'total_bookings': total_bookings,
+        'total_revenue': total_revenue,
+        'total_receipts': total_receipts,
+        'pending_billings': pending_billings,
+        'from_date': from_date,
+        'to_date': to_date
     }
-    
-    return metrics
 
-def display_kpi_cards(metrics):
-    """Display KPI cards"""
-    st.markdown("### 📈 Key Performance Indicators")
-    
-    # First row - Bookings and Operations
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric(
-            "Total Bookings", 
-            metrics['total_bookings'],
-            delta=f"+{metrics['confirmed_bookings'] - metrics['cancelled_bookings']}"
-        )
-    
-    with col2:
-        st.metric(
-            "Delivered", 
-            metrics['delivered_bookings'],
-            delta=f"{(metrics['delivered_bookings']/max(metrics['total_bookings'], 1)*100):.1f}%"
-        )
-    
-    with col3:
-        st.metric(
-            "Invoices Generated", 
-            metrics['total_invoices']
-        )
-    
-    with col4:
-        st.metric(
-            "Pending Billings", 
-            metrics['pending_billings'],
-            delta_color="inverse"
-        )
-    
-    # Second row - Financial
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric(
-            "Total Revenue", 
-            f"₹{metrics['total_revenue']:,.0f}"
-        )
-    
-    with col2:
-        st.metric(
-            "Total Receipts", 
-            f"₹{metrics['total_receipts']:,.0f}"
-        )
-    
-    with col3:
-        collection_efficiency = (metrics['total_receipts'] / max(metrics['total_revenue'], 1)) * 100
-        st.metric(
-            "Collection Efficiency", 
-            f"{collection_efficiency:.1f}%",
-            delta=f"₹{metrics['total_revenue'] - metrics['total_receipts']:,.0f}"
-        )
-    
-    with col4:
-        st.metric(
-            "Total Outstanding", 
-            f"₹{metrics['outstanding_amount']:,.0f}",
-            delta_color="inverse"
-        )
-    
-    # Third row - Operations
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric(
-            "Fuel Consumed", 
-            f"{metrics['fuel_consumption']:.1f}L"
-        )
-    
-    with col2:
-        st.metric(
-            "Fuel Cost", 
-            f"₹{metrics['fuel_cost']:,.0f}"
-        )
-    
-    with col3:
-        st.metric(
-            "Active Vehicles", 
-            metrics['active_vehicles']
-        )
-    
-    with col4:
-        st.metric(
-            "Cash & Carry", 
-            metrics['cash_carry_movements']
-        )
+def display_modern_metric_cards(metrics):
+    """Display modern styled metric cards"""
+    # Metric cards with modern styling
+    st.markdown('''
+    <div class="metric-row">
+        <div class="metric-card metric-card-purple">
+            <div class="metric-title">Total Bookings</div>
+            <div class="metric-value">{}</div>
+        </div>
+        <div class="metric-card metric-card-pink">
+            <div class="metric-title">Total Revenue</div>
+            <div class="metric-value">₹{:,}</div>
+        </div>
+        <div class="metric-card metric-card-blue">
+            <div class="metric-title">Total Receipts</div>
+            <div class="metric-value">₹{:,}</div>
+        </div>
+        <div class="metric-card metric-card-orange">
+            <div class="metric-title">Pending Billings</div>
+            <div class="metric-value">{}</div>
+        </div>
+    </div>
+    '''.format(
+        metrics['total_bookings'],
+        int(metrics['total_revenue']),
+        int(metrics['total_receipts']), 
+        metrics['pending_billings']
+    ), unsafe_allow_html=True)
 
-def display_charts(metrics, period_type, from_date, to_date):
-    """Display various charts and visualizations"""
-    st.markdown("---")
-    st.markdown("### 📊 Analytics & Trends")
+def display_recent_bookings_table(from_date, to_date):
+    """Display recent bookings in a modern table format"""
+    st.markdown('''
+    <div class="section-header">
+        📦 Recent Bookings
+    </div>
+    ''', unsafe_allow_html=True)
     
-    # Create two columns for charts
-    col1, col2 = st.columns(2)
+    if not st.session_state.bookings:
+        st.info("No bookings found.")
+        return
     
-    with col1:
-        # Revenue vs Receipts Chart
-        st.markdown("#### Revenue vs Receipts")
-        
-        # Get trend data
-        if period_type == "Day-wise":
-            trend_data = get_daily_trend(from_date, to_date)
-            x_axis = "Date"
-        elif period_type == "Month-wise":
-            trend_data = get_daily_trend(from_date, to_date)
-            x_axis = "Date"
+    # Get recent bookings (last 10)
+    recent_bookings = sorted(st.session_state.bookings, 
+                           key=lambda x: x.get('created_date', datetime.datetime.now()), 
+                           reverse=True)[:10]
+    
+    # Prepare data for display
+    booking_data = []
+    for booking in recent_bookings:
+        # Format status with styling
+        status = booking.get('status', 'Created')
+        if status == 'Delivered':
+            status_html = '<span class="status-delivered">Delivered</span>'
+        elif status == 'Dispatched':
+            status_html = '<span class="status-dispatched">Dispatched</span>'
         else:
-            trend_data = get_monthly_trend(from_date, to_date)
-            x_axis = "Month"
-        
-        if trend_data:
-            df_trend = pd.DataFrame(trend_data)
-            st.bar_chart(df_trend.set_index(x_axis)[['Revenue', 'Receipts']])
-        else:
-            st.info("No data available for the selected period")
-    
-    with col2:
-        # Booking Status Distribution
-        st.markdown("#### Booking Status Distribution")
-        
-        period_bookings = [
-            b for b in st.session_state.bookings 
-            if from_date <= b['pickup_date'] <= to_date
-        ]
-        
-        if period_bookings:
-            status_counts = {}
-            for booking in period_bookings:
-                status = booking['status']
-                status_counts[status] = status_counts.get(status, 0) + 1
+            status_html = status
             
-            if status_counts:
-                status_df = pd.DataFrame(list(status_counts.items()), 
-                                       columns=['Status', 'Count'])
-                st.bar_chart(status_df.set_index('Status'))
-        else:
-            st.info("No bookings found for the selected period")
+        booking_data.append({
+            'Booking #': booking['booking_number'],
+            'Customer': booking['customer_name'],
+            'Status': status_html,
+            'Amount': f"₹{booking['total_amount']:,.0f}",
+            'Date': booking.get('pickup_date', datetime.date.today()).strftime('%d-%b-%Y') if isinstance(booking.get('pickup_date'), datetime.date) else str(booking.get('pickup_date', ''))
+        })
     
-    # Vehicle fuel consumption chart
-    st.markdown("#### Vehicle Fuel Consumption")
-    
-    period_fuel_logs = [
-        f for f in st.session_state.fuel_logs 
-        if from_date <= f['date'] <= to_date
-    ]
-    
-    if period_fuel_logs:
-        vehicle_fuel = {}
-        for log in period_fuel_logs:
-            vehicle = log['vehicle_registration']
-            if vehicle not in vehicle_fuel:
-                vehicle_fuel[vehicle] = {'liters': 0, 'cost': 0}
-            vehicle_fuel[vehicle]['liters'] += log['liters']
-            vehicle_fuel[vehicle]['cost'] += log['cost']
-        
-        if vehicle_fuel:
-            fuel_df = pd.DataFrame(vehicle_fuel).T
-            fuel_df.index.name = 'Vehicle'
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("##### Fuel Consumption (Liters)")
-                st.bar_chart(fuel_df['liters'])
-            
-            with col2:
-                st.markdown("##### Fuel Cost (₹)")
-                st.bar_chart(fuel_df['cost'])
+    if booking_data:
+        df = pd.DataFrame(booking_data)
+        st.markdown(df.to_html(escape=False, index=False), unsafe_allow_html=True)
     else:
-        st.info("No fuel data found for the selected period")
+        st.info("No recent bookings to display.")
 
-def get_daily_trend(from_date, to_date):
-    """Get daily trend data"""
-    trend_data = []
-    
-    current_date = from_date
-    while current_date <= to_date:
-        day_invoices = [
-            inv for inv in st.session_state.invoices 
-            if inv['invoice_date'] == current_date
-        ]
-        
-        day_payments = [
-            p for p in st.session_state.customer_payments 
-            if p['payment_date'] == current_date
-        ]
-        
-        revenue = sum(inv['total_amount'] for inv in day_invoices)
-        receipts = sum(p['payment_amount'] for p in day_payments)
-        
-        trend_data.append({
-            'Date': current_date.strftime('%Y-%m-%d'),
-            'Revenue': revenue,
-            'Receipts': receipts
-        })
-        
-        current_date += datetime.timedelta(days=1)
-    
-    return trend_data
 
-def get_monthly_trend(from_date, to_date):
-    """Get monthly trend data"""
-    trend_data = []
+def display_customer_outstanding_report():
+    """Display customer outstanding report"""
+    st.markdown("---")
+    st.markdown('''
+    <div class="section-header">
+        💰 Customer Outstanding Report
+    </div>
+    ''', unsafe_allow_html=True)
     
-    current_month = from_date.month
-    current_year = from_date.year
+    # Calculate outstanding amounts for each customer
+    customer_outstanding = {}
     
-    while current_year <= to_date.year and (current_year < to_date.year or current_month <= to_date.month):
-        month_start = datetime.date(current_year, current_month, 1)
-        if current_month == 12:
-            month_end = datetime.date(current_year + 1, 1, 1) - datetime.timedelta(days=1)
+    # Get all customers
+    for customer in st.session_state.customers:
+        customer_outstanding[customer['name']] = {
+            'customer_id': customer['id'],
+            'customer_name': customer['name'],
+            'total_invoices': 0,
+            'total_amount': 0,
+            'outstanding_amount': 0,
+            'paid_amount': 0,
+            'overdue_amount': 0,
+            'invoices': []
+        }
+    
+    # Calculate outstanding from invoices
+    for invoice in st.session_state.invoices:
+        customer_name = invoice['customer_name']
+        if customer_name in customer_outstanding:
+            customer_outstanding[customer_name]['total_invoices'] += 1
+            customer_outstanding[customer_name]['total_amount'] += invoice['total_amount']
+            customer_outstanding[customer_name]['outstanding_amount'] += invoice.get('outstanding_amount', invoice['total_amount'])
+            customer_outstanding[customer_name]['paid_amount'] += invoice['total_amount'] - invoice.get('outstanding_amount', invoice['total_amount'])
+            
+            # Check if overdue
+            if (invoice.get('due_date') and 
+                datetime.datetime.now().date() > invoice['due_date'] and 
+                invoice.get('outstanding_amount', invoice['total_amount']) > 0):
+                customer_outstanding[customer_name]['overdue_amount'] += invoice.get('outstanding_amount', invoice['total_amount'])
+            
+            customer_outstanding[customer_name]['invoices'].append(invoice)
+    
+    # Filter customers with outstanding amounts
+    customers_with_outstanding = {k: v for k, v in customer_outstanding.items() if v['outstanding_amount'] > 0}
+    
+    if not customers_with_outstanding:
+        st.success("🎉 No outstanding amounts! All customers are up to date with payments.")
+        return
+    
+    # Customer selection for detailed view
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        selected_customer = st.selectbox(
+            "Select Customer for Detailed Report",
+            ["All Customers"] + list(customers_with_outstanding.keys()),
+            key="outstanding_customer_select"
+        )
+    
+    with col2:
+        if st.button("Refresh Outstanding", type="primary"):
+            st.rerun()
+    
+    if selected_customer == "All Customers":
+        # Summary table for all customers
+        summary_data = []
+        total_outstanding = 0
+        total_overdue = 0
+        
+        for customer_name, data in customers_with_outstanding.items():
+            summary_data.append({
+                'Customer': customer_name,
+                'Total Invoices': data['total_invoices'],
+                'Total Amount': f"₹{data['total_amount']:,.2f}",
+                'Paid Amount': f"₹{data['paid_amount']:,.2f}",
+                'Outstanding': f"₹{data['outstanding_amount']:,.2f}",
+                'Overdue': f"₹{data['overdue_amount']:,.2f}" if data['overdue_amount'] > 0 else "₹0.00"
+            })
+            total_outstanding += data['outstanding_amount']
+            total_overdue += data['overdue_amount']
+        
+        # Display summary metrics
+        metric_col1, metric_col2, metric_col3 = st.columns(3)
+        with metric_col1:
+            st.metric("Total Outstanding", f"₹{total_outstanding:,.2f}")
+        with metric_col2:
+            st.metric("Total Overdue", f"₹{total_overdue:,.2f}", delta_color="inverse")
+        with metric_col3:
+            st.metric("Customers with Outstanding", len(customers_with_outstanding))
+        
+        st.markdown("**Outstanding Summary by Customer:**")
+        df_summary = pd.DataFrame(summary_data)
+        st.dataframe(df_summary, use_container_width=True)
+        
+        # Export option
+        if st.button("Export Outstanding Report"):
+            csv = df_summary.to_csv(index=False)
+            st.download_button(
+                label="Download Outstanding Report CSV",
+                data=csv,
+                file_name=f"customer_outstanding_report_{datetime.datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv"
+            )
+    
+    else:
+        # Detailed view for selected customer
+        customer_data = customers_with_outstanding[selected_customer]
+        
+        st.markdown(f"**Outstanding Details for: {selected_customer}**")
+        
+        # Customer metrics
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Invoices", customer_data['total_invoices'])
+        with col2:
+            st.metric("Outstanding Amount", f"₹{customer_data['outstanding_amount']:,.2f}")
+        with col3:
+            st.metric("Overdue Amount", f"₹{customer_data['overdue_amount']:,.2f}", delta_color="inverse")
+        with col4:
+            collection_rate = ((customer_data['paid_amount'] / customer_data['total_amount']) * 100) if customer_data['total_amount'] > 0 else 0
+            st.metric("Collection Rate", f"{collection_rate:.1f}%")
+        
+        # Invoice details
+        st.markdown("**Invoice Details:**")
+        invoice_details = []
+        
+        for invoice in customer_data['invoices']:
+            if invoice.get('outstanding_amount', invoice['total_amount']) > 0:  # Only show unpaid invoices
+                days_overdue = 0
+                if invoice.get('due_date'):
+                    days_overdue = max(0, (datetime.datetime.now().date() - invoice['due_date']).days)
+                
+                status = "🔴 Overdue" if days_overdue > 0 else "🟡 Due"
+                
+                invoice_details.append({
+                    'Status': status,
+                    'Invoice Number': invoice['invoice_number'],
+                    'Invoice Date': invoice['invoice_date'].strftime('%Y-%m-%d') if isinstance(invoice['invoice_date'], datetime.date) else str(invoice['invoice_date']),
+                    'Due Date': invoice['due_date'].strftime('%Y-%m-%d') if isinstance(invoice['due_date'], datetime.date) else str(invoice['due_date']),
+                    'Total Amount': f"₹{invoice['total_amount']:,.2f}",
+                    'Outstanding': f"₹{invoice.get('outstanding_amount', invoice['total_amount']):,.2f}",
+                    'Days Overdue': days_overdue if days_overdue > 0 else 0
+                })
+        
+        if invoice_details:
+            df_invoices = pd.DataFrame(invoice_details)
+            st.dataframe(df_invoices, use_container_width=True)
         else:
-            month_end = datetime.date(current_year, current_month + 1, 1) - datetime.timedelta(days=1)
-        
-        month_invoices = [
-            inv for inv in st.session_state.invoices 
-            if month_start <= inv['invoice_date'] <= month_end
-        ]
-        
-        month_payments = [
-            p for p in st.session_state.customer_payments 
-            if month_start <= p['payment_date'] <= month_end
-        ]
-        
-        revenue = sum(inv['total_amount'] for inv in month_invoices)
-        receipts = sum(p['payment_amount'] for p in month_payments)
-        
-        trend_data.append({
-            'Month': datetime.date(current_year, current_month, 1).strftime('%Y-%m'),
-            'Revenue': revenue,
-            'Receipts': receipts
-        })
-        
-        if current_month == 12:
-            current_month = 1
-            current_year += 1
-        else:
-            current_month += 1
-    
-    return trend_data
+            st.success("No outstanding invoices for this customer.")
 
 def display_detailed_data(from_date, to_date):
     """Display detailed data tables"""
     st.markdown("---")
-    st.markdown("### 📋 Detailed Data")
+    st.markdown('''
+    <div class="section-header">
+        📋 Detailed Data
+    </div>
+    ''', unsafe_allow_html=True)
     
     tab1, tab2, tab3, tab4 = st.tabs(["Recent Bookings", "Recent Invoices", "Recent Payments", "Vehicle Status"])
     
@@ -363,9 +339,9 @@ def display_detailed_data(from_date, to_date):
         st.markdown("#### Recent Bookings")
         recent_bookings = [
             b for b in st.session_state.bookings 
-            if from_date <= b['pickup_date'] <= to_date
+            if from_date <= safe_get_date(b.get('pickup_date', datetime.datetime.now())) <= to_date
         ]
-        recent_bookings = sorted(recent_bookings, key=lambda x: x['created_date'], reverse=True)[:10]
+        recent_bookings = sorted(recent_bookings, key=lambda x: safe_get_date(x.get('created_date', datetime.datetime.now())), reverse=True)[:10]
         
         if recent_bookings:
             booking_data = []
@@ -378,15 +354,15 @@ def display_detailed_data(from_date, to_date):
                     'Delivered': '🟢',
                     'POD Captured': '✅',
                     'Cancelled': '❌'
-                }.get(booking['status'], '⚪')
+                }.get(booking.get('status', 'Created'), '⚪')
                 
                 booking_data.append({
-                    'Status': f"{status_color} {booking['status']}",
-                    'Booking Number': booking['booking_number'],
-                    'Customer': booking['customer_name'],
-                    'Route': f"{booking['pickup_location']} → {booking['delivery_location']}",
-                    'Pickup Date': booking['pickup_date'],
-                    'Amount': f"₹{booking['total_amount']:,.2f}"
+                    'Status': f"{status_color} {booking.get('status', 'Created')}",
+                    'Booking Number': booking.get('booking_number', 'N/A'),
+                    'Customer': booking.get('customer_name', 'N/A'),
+                    'Route': f"{booking.get('pickup_location', 'N/A')} → {booking.get('delivery_location', 'N/A')}",
+                    'Pickup Date': safe_get_date(booking.get('pickup_date', datetime.datetime.now())).strftime('%d-%b-%Y'),
+                    'Amount': f"₹{booking.get('total_amount', 0):,.2f}"
                 })
             
             df_bookings = pd.DataFrame(booking_data)
@@ -398,16 +374,18 @@ def display_detailed_data(from_date, to_date):
         st.markdown("#### Recent Invoices")
         recent_invoices = [
             inv for inv in st.session_state.invoices 
-            if from_date <= inv['invoice_date'] <= to_date
+            if from_date <= safe_get_date(inv.get('invoice_date', datetime.datetime.now())) <= to_date
         ]
-        recent_invoices = sorted(recent_invoices, key=lambda x: x['created_date'], reverse=True)[:10]
+        recent_invoices = sorted(recent_invoices, key=lambda x: safe_get_date(x.get('created_date', datetime.datetime.now())), reverse=True)[:10]
         
         if recent_invoices:
             invoice_data = []
             for invoice in recent_invoices:
-                days_overdue = max(0, (datetime.datetime.now().date() - invoice['due_date']).days)
+                due_date = safe_get_date(invoice.get('due_date', datetime.datetime.now()))
+                days_overdue = max(0, (datetime.datetime.now().date() - due_date).days)
                 
-                if invoice['outstanding_amount'] <= 0:
+                outstanding = invoice.get('outstanding_amount', invoice.get('total_amount', 0))
+                if outstanding <= 0:
                     status_color = "🟢 Paid"
                 elif days_overdue == 0:
                     status_color = "🟡 Current"
@@ -418,12 +396,12 @@ def display_detailed_data(from_date, to_date):
                 
                 invoice_data.append({
                     'Status': status_color,
-                    'Invoice Number': invoice['invoice_number'],
-                    'Type': invoice['invoice_type'],
-                    'Customer': invoice['customer_name'],
-                    'Date': invoice['invoice_date'],
-                    'Amount': f"₹{invoice['total_amount']:,.2f}",
-                    'Outstanding': f"₹{invoice['outstanding_amount']:,.2f}"
+                    'Invoice Number': invoice.get('invoice_number', 'N/A'),
+                    'Type': invoice.get('invoice_type', 'N/A'),
+                    'Customer': invoice.get('customer_name', 'N/A'),
+                    'Date': safe_get_date(invoice.get('invoice_date', datetime.datetime.now())).strftime('%d-%b-%Y'),
+                    'Amount': f"₹{invoice.get('total_amount', 0):,.2f}",
+                    'Outstanding': f"₹{outstanding:,.2f}"
                 })
             
             df_invoices = pd.DataFrame(invoice_data)
@@ -433,35 +411,38 @@ def display_detailed_data(from_date, to_date):
     
     with tab3:
         st.markdown("#### Recent Payments")
-        recent_payments = [
-            p for p in st.session_state.customer_payments 
-            if from_date <= p['payment_date'] <= to_date
-        ]
-        recent_payments = sorted(recent_payments, key=lambda x: x['created_date'], reverse=True)[:10]
-        
-        if recent_payments:
-            payment_data = []
-            for payment in recent_payments:
-                allocation_icon = "✅" if payment['allocation_status'] == 'Allocated' else "⏳"
-                
-                payment_data.append({
-                    'Status': f"{allocation_icon} {payment['allocation_status']}",
-                    'Customer': payment['customer_name'],
-                    'Date': payment['payment_date'],
-                    'Amount': f"₹{payment['payment_amount']:,.2f}",
-                    'Method': payment['payment_method'],
-                    'Reference': payment.get('reference_number', '')
-                })
+        if 'customer_payments' in st.session_state:
+            recent_payments = [
+                p for p in st.session_state.customer_payments 
+                if from_date <= safe_get_date(p.get('payment_date', datetime.datetime.now())) <= to_date
+            ]
+            recent_payments = sorted(recent_payments, key=lambda x: safe_get_date(x.get('created_date', datetime.datetime.now())), reverse=True)[:10]
             
-            df_payments = pd.DataFrame(payment_data)
-            st.dataframe(df_payments, use_container_width=True)
+            if recent_payments:
+                payment_data = []
+                for payment in recent_payments:
+                    allocation_icon = "✅" if payment.get('allocation_status', 'Pending') == 'Allocated' else "⏳"
+                    
+                    payment_data.append({
+                        'Status': f"{allocation_icon} {payment.get('allocation_status', 'Pending')}",
+                        'Customer': payment.get('customer_name', 'N/A'),
+                        'Date': safe_get_date(payment.get('payment_date', datetime.datetime.now())).strftime('%d-%b-%Y'),
+                        'Amount': f"₹{payment.get('payment_amount', 0):,.2f}",
+                        'Method': payment.get('payment_method', 'N/A'),
+                        'Reference': payment.get('reference_number', '')
+                    })
+                
+                df_payments = pd.DataFrame(payment_data)
+                st.dataframe(df_payments, use_container_width=True)
+            else:
+                st.info("No recent payments found")
         else:
-            st.info("No recent payments found")
+            st.info("No payment data available")
     
     with tab4:
         st.markdown("#### Vehicle Status")
         
-        if st.session_state.vehicles:
+        if 'vehicles' in st.session_state and st.session_state.vehicles:
             vehicle_data = []
             for vehicle in st.session_state.vehicles:
                 status_icon = {
@@ -470,29 +451,29 @@ def display_detailed_data(from_date, to_date):
                     'Inactive': '🔴'
                 }.get(vehicle.get('status', 'Active'), '⚪')
                 
-                # Get latest odometer reading
-                vehicle_odometer = [log for log in st.session_state.odometer_logs 
-                                 if log['vehicle_registration'] == vehicle['registration_number']]
-                
-                if vehicle_odometer:
-                    latest_reading = max(vehicle_odometer, key=lambda x: x['date'])
-                    last_reading = f"{latest_reading['kilometer_reading']:,} KM"
-                    last_reading_date = latest_reading['date']
-                else:
-                    last_reading = "No data"
-                    last_reading_date = None
+                # Get latest odometer reading if available
+                last_reading = "No data"
+                last_reading_date = 'N/A'
+                if 'odometer_logs' in st.session_state:
+                    vehicle_odometer = [log for log in st.session_state.odometer_logs 
+                                     if log.get('vehicle_registration') == vehicle.get('registration_number')]
+                    
+                    if vehicle_odometer:
+                        latest_reading = max(vehicle_odometer, key=lambda x: safe_get_date(x.get('date', datetime.datetime.now())))
+                        last_reading = f"{latest_reading.get('kilometer_reading', 0):,} KM"
+                        last_reading_date = safe_get_date(latest_reading.get('date', datetime.datetime.now())).strftime('%d-%b-%Y')
                 
                 vehicle_data.append({
                     'Status': f"{status_icon} {vehicle.get('status', 'Active')}",
-                    'Registration': vehicle['registration_number'],
-                    'Type': vehicle['vehicle_type'],
+                    'Registration': vehicle.get('registration_number', 'N/A'),
+                    'Type': vehicle.get('vehicle_type', 'N/A'),
                     'Fuel Type': vehicle.get('fuel_type', 'N/A'),
                     'Driver': vehicle.get('linked_driver', 'Not Assigned'),
                     'Last Reading': last_reading,
-                    'Last Updated': last_reading_date or 'N/A'
+                    'Last Updated': last_reading_date
                 })
             
             df_vehicles = pd.DataFrame(vehicle_data)
             st.dataframe(df_vehicles, use_container_width=True)
         else:
-            st.info("No vehicles found")
+            st.info("No vehicle data available")

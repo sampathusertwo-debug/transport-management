@@ -3,6 +3,7 @@ import pandas as pd
 import datetime
 from datetime import timedelta
 import uuid
+from .utils import searchable_selectbox, static_selectbox
 
 def show():
     """Display the vehicle master module"""
@@ -34,6 +35,11 @@ def show():
 
 def vehicle_driver_management():
     """Manage vehicles and drivers"""
+    # Load vehicles and drivers from database if not loaded
+    from database import load_data_when_needed
+    load_data_when_needed('vehicles')
+    load_data_when_needed('drivers')
+    
     col1, col2 = st.columns(2)
     
     with col1:
@@ -108,7 +114,7 @@ def add_vehicle_form():
     
     with col1:
         registration_number = st.text_input("Registration Number*", key="new_vehicle_reg")
-        vehicle_type = st.selectbox(
+        vehicle_type = static_selectbox(
             "Vehicle Type*",
             ["Mini Truck", "Small Truck", "Medium Truck", "Large Truck", "Container", "Trailer"],
             key="new_vehicle_type"
@@ -116,7 +122,7 @@ def add_vehicle_form():
         vehicle_length = st.text_input("Vehicle Length", key="new_vehicle_length")
     
     with col2:
-        fuel_type = st.selectbox(
+        fuel_type = static_selectbox(
             "Fuel Type",
             ["Diesel", "Petrol", "CNG", "Electric"],
             key="new_vehicle_fuel"
@@ -124,7 +130,7 @@ def add_vehicle_form():
         
         # Driver assignment
         available_drivers = ["None"] + [d['name'] for d in st.session_state.drivers if d.get('status') == 'Available']
-        linked_driver = st.selectbox("Link Driver", available_drivers, key="new_vehicle_driver")
+        linked_driver = searchable_selectbox("Link Driver", available_drivers, key="new_vehicle_driver")
     
     if st.button("Add Vehicle"):
         if not registration_number:
@@ -142,15 +148,22 @@ def add_vehicle_form():
             'created_date': datetime.datetime.now()
         }
         
-        st.session_state.vehicles.append(vehicle)
-        st.success(f"Vehicle {registration_number} added successfully!")
-        
-        # Clear form
-        for key in list(st.session_state.keys()):
-            if key.startswith('new_vehicle_'):
-                del st.session_state[key]
-        
-        st.rerun()
+        # Save to database
+        from app import save_vehicle
+        if save_vehicle(vehicle):
+            # Add to session state for immediate display
+            st.session_state.vehicles.append(vehicle)
+            
+            st.success(f"Vehicle {registration_number} added successfully!")
+            
+            # Clear form
+            for key in list(st.session_state.keys()):
+                if key.startswith('new_vehicle_'):
+                    del st.session_state[key]
+            
+            st.rerun()
+        else:
+            st.error("Failed to save vehicle. Please try again.")
 
 def add_driver_form():
     """Form to add new driver"""
@@ -179,18 +192,32 @@ def add_driver_form():
             'created_date': datetime.datetime.now()
         }
         
-        st.session_state.drivers.append(driver)
-        st.success(f"Driver {driver_name} added successfully!")
-        
-        # Clear form
-        for key in list(st.session_state.keys()):
-            if key.startswith('new_driver_'):
-                del st.session_state[key]
+        # Save to database
+        from app import save_driver
+        if save_driver(driver):
+            # Add to session state for immediate display
+            st.session_state.drivers.append(driver)
+            
+            st.success(f"Driver {driver_name} added successfully!")
+            
+            # Clear form
+            for key in list(st.session_state.keys()):
+                if key.startswith('new_driver_'):
+                    del st.session_state[key]
+            
+            st.rerun()
+        else:
+            st.error("Failed to save driver. Please try again.")
         
         st.rerun()
 
 def fuel_logs():
     """Manage fuel logs"""
+    # Load data when needed
+    from database import load_data_when_needed
+    load_data_when_needed('vehicles')
+    load_data_when_needed('fuel_logs')
+    
     st.subheader("Fuel Logs")
     
     col1, col2 = st.columns([2, 1])
@@ -238,10 +265,24 @@ def fuel_logs():
                 'created_date': datetime.datetime.now()
             }
             
-            st.session_state.fuel_logs.append(fuel_log)
-            st.success("Fuel entry added successfully!")
-            
-            # Clear form
+            # Save to database
+            from app import save_fuel_log
+            if save_fuel_log(fuel_log):
+                # Add to session state for immediate display
+                if 'fuel_logs' not in st.session_state:
+                    st.session_state.fuel_logs = []
+                st.session_state.fuel_logs.append(fuel_log)
+                
+                st.success("Fuel entry added successfully!")
+                
+                # Clear form
+                for key in list(st.session_state.keys()):
+                    if key.startswith('fuel_'):
+                        del st.session_state[key]
+                
+                st.rerun()
+            else:
+                st.error("Failed to save fuel entry. Please try again.")
             for key in list(st.session_state.keys()):
                 if key.startswith('fuel_'):
                     del st.session_state[key]
@@ -328,6 +369,11 @@ def fuel_logs():
 
 def odometer_logs():
     """Manage odometer logs"""
+    # Load data when needed
+    from database import load_data_when_needed
+    load_data_when_needed('vehicles')
+    load_data_when_needed('odometer_logs')
+    
     st.subheader("Odometer Logs")
     
     col1, col2 = st.columns([2, 1])
@@ -381,8 +427,17 @@ def odometer_logs():
                 'created_date': datetime.datetime.now()
             }
             
-            st.session_state.odometer_logs.append(odometer_log)
-            st.success("Odometer reading added successfully!")
+            # Save to database
+            from app import save_odometer_log
+            if save_odometer_log(odometer_log):
+                # Add to session state for immediate display
+                if 'odometer_logs' not in st.session_state:
+                    st.session_state.odometer_logs = []
+                st.session_state.odometer_logs.append(odometer_log)
+                
+                st.success("Odometer reading added successfully!")
+            else:
+                st.error("Failed to save odometer reading. Please try again.")
             
             # Clear form
             for key in list(st.session_state.keys()):

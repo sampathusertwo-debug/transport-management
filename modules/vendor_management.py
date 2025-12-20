@@ -2,10 +2,36 @@ import streamlit as st
 import pandas as pd
 import datetime
 import uuid
+
+def safe_format_date(date_field, format_str='%Y-%m-%d'):
+    """Safely format date from various date formats"""
+    try:
+        if isinstance(date_field, str):
+            try:
+                parsed_date = datetime.datetime.fromisoformat(date_field.replace('Z', '+00:00'))
+                return parsed_date.strftime(format_str)
+            except:
+                try:
+                    parsed_date = datetime.datetime.strptime(date_field, '%Y-%m-%d %H:%M:%S')
+                    return parsed_date.strftime(format_str)
+                except:
+                    return date_field
+        elif hasattr(date_field, 'strftime'):
+            return date_field.strftime(format_str)
+        else:
+            return str(date_field)
+    except:
+        return str(date_field)
 from typing import Dict, List
 
 def show():
     """Display the vendor management module"""
+    # Load data when needed
+    from database import load_data_when_needed
+    load_data_when_needed('vendors')
+    load_data_when_needed('vendor_bills')
+    load_data_when_needed('vendor_payments')
+    
     st.header("🏪 Vendor Management")
     
     tab1, tab2, tab3, tab4 = st.tabs(["Vendor Bills", "Vendor Payments", "Vendor Ledger", "Manage Vendors"])
@@ -89,15 +115,19 @@ def vendor_bills():
             'created_date': datetime.datetime.now()
         }
         
-        st.session_state.vendor_bills.append(bill)
-        st.success(f"Bill recorded for {selected_vendor}!")
-        
-        # Clear form
-        for key in st.session_state.keys():
-            if key.startswith('bill_'):
-                del st.session_state[key]
-        
-        st.rerun()
+        # Save to database
+        from app import save_vendor_bill
+        if save_vendor_bill(bill):
+            st.success(f"Bill recorded for {selected_vendor}!")
+            
+            # Clear form
+            for key in st.session_state.keys():
+                if key.startswith('bill_'):
+                    del st.session_state[key]
+            
+            st.rerun()
+        else:
+            st.error("Failed to save bill. Please try again.")
 
 def vendor_payments():
     """Record vendor payments"""
@@ -202,26 +232,29 @@ def vendor_payments():
             'created_date': datetime.datetime.now()
         }
         
-        st.session_state.vendor_payments.append(payment)
-        
-        # Update bill outstanding amounts
-        for bill in vendor_bills:
-            allocate_amount = st.session_state.get(f"vendor_allocate_{bill['id']}", 0.0)
-            if allocate_amount > 0:
-                bill['outstanding_amount'] -= allocate_amount
+        # Save to database
+        from app import save_vendor_payment
+        if save_vendor_payment(payment):
+            # Update bill outstanding amounts
+            for bill in vendor_bills:
+                allocate_amount = st.session_state.get(f"vendor_allocate_{bill['id']}", 0.0)
+                if allocate_amount > 0:
+                    bill['outstanding_amount'] -= allocate_amount
                 if bill['outstanding_amount'] <= 0:
                     bill['status'] = 'Paid'
                 else:
                     bill['status'] = 'Partially Paid'
-        
-        st.success(f"Payment of ₹{payment_amount:,.2f} recorded for {selected_vendor}!")
-        
-        # Clear form
-        for key in st.session_state.keys():
-            if key.startswith('vendor_payment_') or key.startswith('vendor_allocate_'):
-                del st.session_state[key]
-        
-        st.rerun()
+            
+            st.success(f"Payment of ₹{payment_amount:,.2f} recorded for {selected_vendor}!")
+            
+            # Clear form
+            for key in st.session_state.keys():
+                if key.startswith('vendor_payment_') or key.startswith('vendor_allocate_'):
+                    del st.session_state[key]
+            
+            st.rerun()
+        else:
+            st.error("Failed to save payment. Please try again.")
 
 def vendor_ledger():
     """Generate vendor ledger reports"""
@@ -354,10 +387,10 @@ def manage_vendors():
                 
                 vendor_data.append({
                     'Name': vendor['name'],
-                    'Contact': vendor.get('contact', ''),
-                    'Category': vendor.get('category', ''),
+                    'Contact': vendor.get('contact_person', '') or vendor.get('phone', ''),
+                    'Category': vendor.get('vendor_type', ''),
                     'Outstanding': f"₹{total_outstanding:,.2f}",
-                    'Created': vendor['created_date'].strftime('%Y-%m-%d')
+                    'Created': safe_format_date(vendor['created_date'])
                 })
             
             df = pd.DataFrame(vendor_data)
@@ -367,10 +400,16 @@ def manage_vendors():
     
     with col2:
         if st.button("Add New Vendor", type="primary"):
-            show_add_vendor_form()
+            st.session_state.show_vendor_form = True
+            st.rerun()
+    
+    # Show add vendor form if requested
+    if st.session_state.get('show_vendor_form', False):
+        show_add_vendor_form()
 
 def show_add_vendor_form():
     """Show form to add new vendor"""
+    st.markdown("---")
     st.markdown("### Add New Vendor")
     
     col1, col2 = st.columns(2)
@@ -389,28 +428,56 @@ def show_add_vendor_form():
         vendor_gst = st.text_input("GST Number", key="new_vendor_gst")
         vendor_address = st.text_area("Address", key="new_vendor_address")
     
-    if st.button("Add Vendor"):
-        if not vendor_name:
-            st.error("Vendor name is required")
-            return
-        
-        vendor = {
-            'id': str(uuid.uuid4()),
-            'name': vendor_name,
-            'contact': vendor_contact,
-            'email': vendor_email,
-            'category': vendor_category,
-            'gst_number': vendor_gst,
-            'address': vendor_address,
-            'created_date': datetime.datetime.now()
-        }
-        
-        st.session_state.vendors.append(vendor)
-        st.success(f"Vendor {vendor_name} added successfully!")
-        
-        # Clear form
-        for key in st.session_state.keys():
-            if key.startswith('new_vendor_'):
-                del st.session_state[key]
-        
-        st.rerun()
+    button_col1, button_col2, button_col3 = st.columns([1, 1, 2])
+    
+    with button_col1:
+        if st.button("Add Vendor", type="primary"):
+            if not vendor_name:
+                st.error("Vendor name is required")
+                return
+            
+            vendor = {
+                'id': str(uuid.uuid4()),
+                'name': vendor_name,
+                'contact_person': vendor_contact,  # Use contact_person instead of contact
+                'phone': vendor_contact,  # Also map to phone field
+                'email': vendor_email,
+                'vendor_type': vendor_category,  # Use vendor_type instead of category
+                'gst_number': vendor_gst,
+                'address': vendor_address,
+                'created_date': datetime.datetime.now()
+            }
+            
+            # Save to database
+            from app import save_vendor
+            if save_vendor(vendor):
+                # Refresh vendors data from database
+                from database import load_data_when_needed
+                st.session_state.vendors = []  # Clear cache to force reload
+                load_data_when_needed('vendors')
+                
+                # Add to session state for immediate display
+                if 'vendors' not in st.session_state:
+                    st.session_state.vendors = []
+                st.session_state.vendors.append(vendor)
+                
+                st.success(f"Vendor {vendor_name} added successfully!")
+                
+                # Clear form and hide it
+                for key in list(st.session_state.keys()):
+                    if key.startswith('new_vendor_'):
+                        del st.session_state[key]
+                st.session_state.show_vendor_form = False
+                
+                st.rerun()
+            else:
+                st.error("Failed to save vendor. Please try again.")
+    
+    with button_col2:
+        if st.button("Cancel"):
+            # Clear form and hide it
+            for key in list(st.session_state.keys()):
+                if key.startswith('new_vendor_'):
+                    del st.session_state[key]
+            st.session_state.show_vendor_form = False
+            st.rerun()

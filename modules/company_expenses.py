@@ -4,8 +4,39 @@ import datetime
 import uuid
 from typing import Dict, List
 
+def format_datetime(date_field):
+    """Safely format datetime from various formats"""
+    if not date_field:
+        return "Not set"
+    
+    if isinstance(date_field, str):
+        try:
+            # Try parsing ISO format with timezone
+            dt = datetime.datetime.fromisoformat(date_field.replace('Z', '+00:00'))
+            return dt.strftime('%Y-%m-%d %H:%M')
+        except:
+            try:
+                # Try parsing standard format
+                dt = datetime.datetime.strptime(date_field, '%Y-%m-%d %H:%M:%S')
+                return dt.strftime('%Y-%m-%d %H:%M')
+            except:
+                try:
+                    # Try parsing date only
+                    dt = datetime.datetime.strptime(date_field, '%Y-%m-%d')
+                    return dt.strftime('%Y-%m-%d')
+                except:
+                    return str(date_field)  # Return as is if can't parse
+    elif hasattr(date_field, 'strftime'):
+        return date_field.strftime('%Y-%m-%d %H:%M')
+    else:
+        return str(date_field)
+
 def show():
     """Display the company expenses module"""
+    # Load data when needed
+    from database import load_data_when_needed
+    load_data_when_needed('expenses')
+    
     st.header("🏢 Company Expenses Tracking")
     
     tab1, tab2 = st.tabs(["Record Expense", "View Expenses"])
@@ -71,15 +102,29 @@ def record_expense():
             'created_by': 'Admin'
         }
         
-        st.session_state.expenses.append(expense)
-        st.success(f"Expense of ₹{expense_amount:,.2f} recorded successfully!")
-        
-        # Clear form
-        for key in st.session_state.keys():
-            if key.startswith('expense_'):
-                del st.session_state[key]
-        
-        st.rerun()
+        # Save to database
+        from app import save_expense
+        if save_expense(expense):
+            # Refresh expenses data from database
+            from database import load_data_when_needed
+            st.session_state.expenses = []  # Clear cache to force reload
+            load_data_when_needed('expenses')
+            
+            # Add to session state for immediate display
+            if 'expenses' not in st.session_state:
+                st.session_state.expenses = []
+            st.session_state.expenses.append(expense)
+            
+            st.success(f"Expense of ₹{expense_amount:,.2f} recorded successfully!")
+            
+            # Clear form
+            for key in st.session_state.keys():
+                if key.startswith('expense_'):
+                    del st.session_state[key]
+            
+            st.rerun()
+        else:
+            st.error("Failed to save expense. Please try again.")
 
 def view_expenses():
     """View and analyze expenses"""
@@ -207,12 +252,18 @@ def view_expenses():
                 st.write(f"**Description:** {expense['description']}")
                 if expense.get('remarks'):
                     st.write(f"**Remarks:** {expense['remarks']}")
-                st.write(f"**Recorded:** {expense['created_date'].strftime('%Y-%m-%d %H:%M')}")
+                st.write(f"**Recorded:** {format_datetime(expense.get('created_date'))}")
             
             # Delete expense
             if st.button(f"Delete", key=f"delete_expense_{expense['id']}"):
-                st.session_state.expenses = [exp for exp in st.session_state.expenses if exp['id'] != expense['id']]
-                st.success("Expense deleted!")
+                # Delete from database
+                from database import delete_from_database
+                if delete_from_database('expenses', expense['id']):
+                    # Remove from session state
+                    st.session_state.expenses = [exp for exp in st.session_state.expenses if exp['id'] != expense['id']]
+                    st.success("Expense deleted successfully!")
+                else:
+                    st.error("Failed to delete expense from database")
                 st.rerun()
     
     # Export options
@@ -228,7 +279,7 @@ def view_expenses():
                 'Payment Method': exp['payment_method'],
                 'Receipt Reference': exp.get('receipt_reference', ''),
                 'Remarks': exp.get('remarks', ''),
-                'Recorded Date': exp['created_date'].strftime('%Y-%m-%d %H:%M')
+                'Recorded Date': format_datetime(exp.get('created_date'))
             })
         
         df = pd.DataFrame(export_data)

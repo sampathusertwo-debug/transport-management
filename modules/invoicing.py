@@ -3,9 +3,48 @@ import pandas as pd
 import datetime
 import uuid
 from typing import Dict, List
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+import io
+from .quotations import safe_get_date
+
+def update_payment_status():
+    """Automatically update payment status based on total payments received"""
+    for invoice in st.session_state.invoices:
+        # Calculate total payments for this invoice
+        total_payments = sum(
+            payment['amount'] for payment in st.session_state.customer_payments 
+            if payment.get('invoice_id') == invoice['id']
+        )
+        
+        # Update outstanding amount
+        invoice['outstanding_amount'] = invoice['total_amount'] - total_payments
+        
+        # Update status based on payments
+        if total_payments == 0:
+            invoice['status'] = 'Generated'
+        elif total_payments >= invoice['total_amount']:
+            invoice['status'] = 'Paid'
+        else:
+            invoice['status'] = 'Partially Paid'
+        
+        # Check for overdue (if due date passed and not fully paid)
+        if (invoice.get('due_date') and 
+            datetime.datetime.now().date() > invoice['due_date'] and 
+            total_payments < invoice['total_amount']):
+            invoice['status'] = 'Overdue'
 
 def show():
     """Display the invoicing module"""
+    # Load data when needed
+    from database import load_data_when_needed
+    load_data_when_needed('bookings')
+    load_data_when_needed('invoices')
+    load_data_when_needed('customers')
+    
     st.header("🧾 Invoicing Management")
     
     tab1, tab2 = st.tabs(["Create Invoice", "View Invoices"])
@@ -28,23 +67,44 @@ def create_invoice():
             create_invoice_from_booking(booking)
             return
     
-    # Manual invoice selection
-    eligible_bookings = [b for b in st.session_state.bookings if b['status'] == 'POD Captured']
+    # Manual invoice selection - Show all completed bookings with POD generated
+    eligible_bookings = [b for b in st.session_state.bookings if b['status'] in ['POD Generated', 'Delivered']]
     
     if not eligible_bookings:
-        st.warning("No eligible bookings found. Only bookings with POD captured can be invoiced.")
+        st.warning("No eligible bookings found. Only bookings with POD generated or delivered status can be invoiced.")
         return
     
-    # Select booking for invoicing
-    booking_options = [f"{b['booking_number']} - {b['customer_name']} - ₹{b['total_amount']:,.2f}" for b in eligible_bookings]
-    selected_booking_option = st.selectbox("Select Booking to Invoice", booking_options, key="invoice_booking_select")
+    st.markdown("**Select Booking to Invoice**")
     
-    if selected_booking_option:
-        booking_number = selected_booking_option.split(" - ")[0]
-        selected_booking = next((b for b in eligible_bookings if b['booking_number'] == booking_number), None)
+    # Create a more informative display of available bookings
+    booking_data = []
+    for booking in eligible_bookings:
+        booking_data.append({
+            'Booking Number': booking['booking_number'],
+            'Customer': booking['customer_name'],
+            'Route': f"{booking['pickup_location']} → {booking['delivery_location']}",
+            'Pickup Date': booking['pickup_date'].strftime('%Y-%m-%d') if isinstance(booking['pickup_date'], datetime.date) else str(booking['pickup_date']),
+            'Amount': f"₹{booking['total_amount']:,.2f}",
+            'Status': booking['status'],
+            'Select': False
+        })
+    
+    if booking_data:
+        df = pd.DataFrame(booking_data)
         
-        if selected_booking:
-            create_invoice_from_booking(selected_booking)
+        # Display table with selection
+        st.dataframe(df.drop('Select', axis=1), use_container_width=True)
+        
+        # Selection dropdown
+        booking_options = [f"{b['booking_number']} - {b['customer_name']} - ₹{b['total_amount']:,.2f}" for b in eligible_bookings]
+        selected_booking_option = st.selectbox("Select Booking to Invoice", booking_options, key="invoice_booking_select")
+        
+        if selected_booking_option:
+            booking_number = selected_booking_option.split(" - ")[0]
+            selected_booking = next((b for b in eligible_bookings if b['booking_number'] == booking_number), None)
+            
+            if selected_booking:
+                create_invoice_from_booking(selected_booking)
 
 def create_invoice_from_booking(booking):
     """Create invoice from booking"""
@@ -129,8 +189,8 @@ def create_invoice_from_booking(booking):
         additional_misc = st.number_input("Miscellaneous Charges (₹)", min_value=0.0, value=0.0, key="invoice_misc")
         discount = st.number_input("Discount (₹)", min_value=0.0, value=0.0, key="invoice_discount")
     
-    # Calculate amounts
-    base_amount = booking['total_amount']
+    # Calculate amounts (ensure all are float for compatibility)
+    base_amount = float(booking['total_amount'])
     additional_charges = additional_fuel + additional_toll + additional_loading + additional_detention + additional_misc
     subtotal = base_amount + additional_charges - discount
     
@@ -239,17 +299,25 @@ def create_invoice_from_booking(booking):
                 'dsr_number': dsr_number
             })
         
-        st.session_state.invoices.append(invoice)
-        
-        # Update booking status
-        booking['status'] = 'Invoiced'
-        booking['invoiced_date'] = datetime.datetime.now()
-        
-        # Clear selected booking
-        if 'selected_booking_id' in st.session_state:
-            del st.session_state.selected_booking_id
-        
-        st.success(f"Invoice {invoice_number} generated successfully!")
+        # Save to database
+        from app import save_invoice
+        if save_invoice(invoice):
+            # Add to session state for immediate display
+            if 'invoices' not in st.session_state:
+                st.session_state.invoices = []
+            st.session_state.invoices.append(invoice)
+            
+            # Update booking status
+            booking['status'] = 'Invoiced'
+            booking['invoiced_date'] = datetime.datetime.now()
+            
+            # Clear selected booking
+            if 'selected_booking_id' in st.session_state:
+                del st.session_state.selected_booking_id
+            
+            st.success(f"Invoice {invoice_number} generated successfully!")
+        else:
+            st.error("Failed to save invoice. Please try again.")
         
         # Show invoice preview
         show_invoice_preview(invoice)
@@ -264,7 +332,11 @@ def create_invoice_from_booking(booking):
 def show_invoice_preview(invoice):
     """Show a preview of the generated invoice"""
     st.markdown("---")
-    st.markdown("### 📄 Invoice Preview")
+    st.markdown('''
+    <div class="section-header">
+        📄 Invoice Preview
+    </div>
+    ''', unsafe_allow_html=True)
     
     with st.container():
         # Header
@@ -350,6 +422,9 @@ def view_invoices():
     """View and manage existing invoices"""
     st.subheader("View Invoices")
     
+    # Update payment status automatically
+    update_payment_status()
+    
     if not st.session_state.invoices:
         st.info("No invoices found. Create your first invoice in the 'Create Invoice' tab.")
         return
@@ -397,7 +472,7 @@ def view_invoices():
     if customer_filter != "All":
         filtered_invoices = [inv for inv in filtered_invoices if inv['customer_name'] == customer_filter]
     
-    filtered_invoices = [inv for inv in filtered_invoices if inv['created_date'].date() >= date_filter]
+    filtered_invoices = [inv for inv in filtered_invoices if safe_get_date(inv['created_date']) >= date_filter]
     
     # Calculate overdue status
     current_date = datetime.datetime.now().date()
@@ -482,23 +557,39 @@ def view_invoices():
                 st.write(f"DSR Number: {invoice['dsr_number']}")
             
             # Action buttons
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             
             with col1:
                 if st.button(f"View Details", key=f"view_{invoice['id']}"):
                     show_invoice_preview(invoice)
             
             with col2:
+                # PDF Generation Button
+                if st.button(f"Download PDF", key=f"pdf_{invoice['id']}"):
+                    try:
+                        pdf_data = generate_invoice_pdf(invoice)
+                        st.download_button(
+                            label="Download Invoice PDF",
+                            data=pdf_data,
+                            file_name=f"Invoice_{invoice['invoice_number']}.pdf",
+                            mime="application/pdf",
+                            key=f"download_pdf_{invoice['id']}"
+                        )
+                    except Exception as e:
+                        st.error(f"Error generating PDF: {str(e)}")
+            
+            with col3:
                 if invoice['outstanding_amount'] > 0:
                     if st.button(f"Record Payment", key=f"payment_{invoice['id']}"):
                         st.session_state.selected_invoice_id = invoice['id']
                         st.success("Navigate to Customer Payments to record payment for this invoice!")
             
-            with col3:
-                if st.button(f"Mark as Sent", key=f"sent_{invoice['id']}"):
-                    invoice['status'] = 'Sent'
-                    st.success("Invoice marked as sent!")
-                    st.rerun()
+            with col4:
+                if invoice['status'] == 'Generated':
+                    if st.button(f"Mark as Sent", key=f"sent_{invoice['id']}"):
+                        invoice['status'] = 'Sent'
+                        st.success("Invoice marked as sent!")
+                        st.rerun()
     
     # Export options
     st.markdown("---")
@@ -528,3 +619,135 @@ def view_invoices():
             file_name=f"invoices_{datetime.datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv"
         )
+
+def generate_invoice_pdf(invoice):
+    """Generate PDF for invoice"""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=18)
+    
+    # Container for the 'Flowable' objects
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Custom styles
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        spaceAfter=30,
+        alignment=1  # Center alignment
+    )
+    
+    # Header
+    title = Paragraph("STRANZ TRANSPORT MANAGEMENT", title_style)
+    elements.append(title)
+    elements.append(Spacer(1, 12))
+    
+    # Invoice details
+    invoice_title = Paragraph(f"<b>{invoice['invoice_type'].upper()}: {invoice['invoice_number']}</b>", styles['Heading2'])
+    elements.append(invoice_title)
+    elements.append(Spacer(1, 12))
+    
+    # Customer and invoice info
+    info_data = [
+        ['Customer:', invoice['customer_name'], 'Invoice Date:', invoice['invoice_date'].strftime('%Y-%m-%d') if isinstance(invoice['invoice_date'], datetime.date) else str(invoice['invoice_date'])],
+        ['Booking:', invoice['booking_number'], 'Due Date:', invoice['due_date'].strftime('%Y-%m-%d') if isinstance(invoice['due_date'], datetime.date) else str(invoice['due_date'])],
+        ['Pickup:', invoice['pickup_location'], 'Delivery:', invoice['delivery_location']],
+        ['Movement:', invoice['movement_type'], 'Distance:', f"{invoice.get('distance_km', 0)} KM"],
+        ['Vehicle:', invoice.get('vehicle_number', 'N/A'), 'Driver:', invoice.get('driver_name', 'N/A')]
+    ]
+    
+    # Add contract details if applicable
+    if invoice['invoice_type'] == "Contract Invoice":
+        info_data.append(['Contract Period:', f"{invoice['contract_start_date']} to {invoice['contract_end_date']}", 'DSR Number:', invoice.get('dsr_number', 'N/A')])
+    
+    info_table = Table(info_data, colWidths=[1.5*inch, 2.5*inch, 1.5*inch, 2*inch])
+    info_table.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+    ]))
+    
+    elements.append(info_table)
+    elements.append(Spacer(1, 20))
+    
+    # Charges table
+    charges_data = [['Description', 'Amount (₹)']]
+    charges_data.append(['Base Amount', f"{invoice['base_amount']:,.2f}"])
+    
+    if invoice.get('additional_fuel', 0) > 0:
+        charges_data.append(['Additional Fuel Charges', f"{invoice['additional_fuel']:,.2f}"])
+    if invoice.get('additional_toll', 0) > 0:
+        charges_data.append(['Additional Toll Charges', f"{invoice['additional_toll']:,.2f}"])
+    if invoice.get('additional_loading', 0) > 0:
+        charges_data.append(['Additional Loading Charges', f"{invoice['additional_loading']:,.2f}"])
+    if invoice.get('additional_detention', 0) > 0:
+        charges_data.append(['Detention Charges', f"{invoice['additional_detention']:,.2f}"])
+    if invoice.get('additional_misc', 0) > 0:
+        charges_data.append(['Miscellaneous Charges', f"{invoice['additional_misc']:,.2f}"])
+    if invoice.get('discount', 0) > 0:
+        charges_data.append(['Discount', f"-{invoice['discount']:,.2f}"])
+    
+    charges_data.append(['Subtotal', f"{invoice['subtotal']:,.2f}"])
+    
+    if invoice.get('gst_applicable', False):
+        charges_data.append([f"GST ({invoice.get('gst_rate', 18)}%)", f"{invoice.get('gst_amount', 0):,.2f}"])
+    
+    charges_data.append(['Total Amount', f"{invoice['total_amount']:,.2f}"])
+    
+    charges_table = Table(charges_data, colWidths=[4*inch, 2*inch])
+    charges_table.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTNAME', (0, -2), (-1, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+        ('BACKGROUND', (0, -1), (-1, -1), colors.lightgrey),
+    ]))
+    
+    elements.append(charges_table)
+    elements.append(Spacer(1, 20))
+    
+    # Notes
+    if invoice.get('invoice_notes'):
+        notes_title = Paragraph("<b>Notes:</b>", styles['Normal'])
+        elements.append(notes_title)
+        notes = Paragraph(invoice['invoice_notes'], styles['Normal'])
+        elements.append(notes)
+        elements.append(Spacer(1, 20))
+    
+    # Payment details
+    payment_info = Paragraph(f"""
+    <b>Payment Information:</b><br/>
+    Total Amount: ₹{invoice['total_amount']:,.2f}<br/>
+    Outstanding: ₹{invoice.get('outstanding_amount', invoice['total_amount']):,.2f}<br/>
+    Payment Terms: {invoice.get('payment_terms', 30)} days<br/>
+    Status: {invoice.get('status', 'Generated')}
+    """, styles['Normal'])
+    elements.append(payment_info)
+    elements.append(Spacer(1, 20))
+    
+    # Terms and conditions
+    terms = Paragraph("""
+    <b>Terms and Conditions:</b><br/>
+    1. Payment should be made within the specified payment terms.<br/>
+    2. All disputes should be reported within 7 days of invoice date.<br/>
+    3. Interest will be charged on overdue amounts as per company policy.<br/>
+    4. Goods once dispatched will not be taken back.<br/>
+    5. This is a computer generated invoice and does not require signature.<br/>
+    """, styles['Normal'])
+    elements.append(terms)
+    
+    # Build PDF
+    doc.build(elements)
+    
+    # Get the value of the BytesIO buffer
+    pdf_data = buffer.getvalue()
+    buffer.close()
+    
+    return pdf_data
