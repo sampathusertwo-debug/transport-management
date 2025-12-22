@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 import uuid
 
 # Import modules
-from modules import quotations, bookings, invoicing, customer_payments, vendor_management, company_expenses, vehicle_master, dashboard, audit_exports
+from modules import quotations, bookings, invoicing, customer_payments, vendor_management, company_expenses, vehicle_master, dashboard, audit_exports, notes
 
 # Import database functions
 from database import init_database, execute_query, get_next_counter_value, save_to_database, update_in_database, refresh_data
@@ -605,22 +605,24 @@ def main():
     user_name = st.session_state.get('user_full_name', 'User')
     user_role = st.session_state.get('user_role', 'Guest')
     
+    # Get current page for header display
+    page = st.session_state.get('current_page', 'Dashboard')
+    
     header_col1, header_col2 = st.columns([3, 1])
     
     with header_col1:
         st.markdown(f'''
-        <div class="main-header">
+        <div class="main-header" style="padding: 1rem; margin-bottom: 1rem;">
             <div>
-                <h1 class="main-title">Dashboard</h1>
+                <h3 class="main-title" style="font-size: 1.5rem; margin: 0;">{page}</h3>
             </div>
             <div>
-                <p class="welcome-text">Welcome, {user_name} ({user_role})</p>
+                <p class="welcome-text" style="font-size: 0.8rem;">Welcome, {user_name} ({user_role})</p>
             </div>
         </div>
         ''', unsafe_allow_html=True)
     
     with header_col2:
-        st.markdown("<br>", unsafe_allow_html=True)  # Add spacing
         if st.button("🚪 Logout", key="logout_btn"):
             logout_user()
     
@@ -647,6 +649,7 @@ def main():
             ("Vendor Management", "🚛"),
             ("Company Expenses", "💸"),
             ("Vehicle Master", "🚗"),
+            ("Notes & Tracking", "📝"),
             ("Audit Exports", "📤")
         ]
         
@@ -654,29 +657,6 @@ def main():
             if st.button(f"{icon} {page_name}", key=f"nav_{page_name}", use_container_width=True):
                 st.session_state.current_page = page_name
                 st.rerun()
-        
-        page = st.session_state.current_page
-        
-        # Quick stats with modern styling
-        st.markdown('''
-        <div style="margin-top: 2rem;">
-            <h3 style="color: #e2e8f0; font-size: 0.9rem; font-weight: 500; margin-bottom: 1rem; opacity: 0.8;">📊 QUICK STATS</h3>
-        </div>
-        ''', unsafe_allow_html=True)
-        
-        total_bookings = len(st.session_state.bookings)
-        total_invoices = len(st.session_state.invoices)
-        # Count unique customers by name, not total booking instances
-        unique_customers = len(set(customer['name'] for customer in st.session_state.customers))
-        total_vehicles = len(st.session_state.vehicles)
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Bookings", total_bookings)
-            st.metric("Customers", unique_customers)
-        with col2:
-            st.metric("Invoices", total_invoices)
-            st.metric("Vehicles", total_vehicles)
     
     # Main content area based on selected page
     if page == "Dashboard":
@@ -695,6 +675,8 @@ def main():
         company_expenses.show()
     elif page == "Vehicle Master":
         vehicle_master.show()
+    elif page == "Notes & Tracking":
+        notes.show()
     elif page == "Audit Exports":
         audit_exports.show()
     

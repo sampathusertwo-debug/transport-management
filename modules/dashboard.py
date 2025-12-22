@@ -83,7 +83,7 @@ def calculate_dashboard_metrics(from_date, to_date):
     # Calculate metrics
     total_bookings = len(filtered_bookings)
     total_revenue = sum(booking['total_amount'] for booking in filtered_bookings)
-    total_receipts = sum(payment['amount'] for payment in filtered_payments)
+    total_receipts = sum(payment.get('payment_amount', payment.get('amount', 0)) for payment in filtered_payments)
     
     # Calculate pending billings (bookings that are delivered but not invoiced)
     pending_billings = len([

@@ -56,8 +56,8 @@ def show():
     # Create tab selection
     selected_tab = st.selectbox(
         "Select Tab",
-        ["Create Booking", "View Bookings"],
-        index=["Create Booking", "View Bookings"].index(st.session_state.booking_active_tab),
+        ["Create Booking", "Cash Booking", "View Bookings"],
+        index=["Create Booking", "Cash Booking", "View Bookings"].index(st.session_state.booking_active_tab) if st.session_state.booking_active_tab in ["Create Booking", "Cash Booking", "View Bookings"] else 0,
         key="booking_tab_selector"
     )
     
@@ -67,6 +67,8 @@ def show():
     
     if selected_tab == "Create Booking":
         create_booking()
+    elif selected_tab == "Cash Booking":
+        create_cash_booking()
     else:
         view_bookings()
 
@@ -212,6 +214,21 @@ def create_booking_from_quotation(quotation):
                 st.session_state.bookings = []
             st.session_state.bookings.append(booking)
             
+            # Track status change for new booking
+            from .notes import track_status_change
+            track_status_change(
+                record_id=booking['id'],
+                record_type='booking',
+                old_status='',
+                new_status='Created',
+                notes=f'Booking created from quotation {quotation["quotation_number"]}',
+                additional_data={
+                    'booking_number': booking['booking_number'],
+                    'quotation_number': quotation['quotation_number'],
+                    'customer_name': booking['customer_name']
+                }
+            )
+            
             # Update quotation status
             quotation['status'] = 'Converted to Booking'
             
@@ -258,7 +275,16 @@ def create_manual_booking():
     else:
         customer_data = next((c for c in st.session_state.customers if c['name'] == customer_choice), None)
         if customer_data:
-            st.info(f"Customer: {customer_data['name']} | Phone: {customer_data['phone']}")
+            st.success(f"✅ **Customer Selected:** {customer_data['name']}")
+            
+            # Display customer details in an info box
+            col1, col2 = st.columns(2)
+            with col1:
+                st.info(f"📞 **Phone:** {customer_data['phone']}")
+                st.info(f"📧 **Email:** {customer_data.get('email', 'Not provided')}")
+            with col2:
+                st.info(f"📍 **Address:** {customer_data.get('address', 'Not provided')}")
+                st.info(f"💰 **Payment Terms:** {customer_data.get('payment_terms', 30)} days")
     
     st.markdown("---")
     st.markdown("**Trip Details**")
@@ -277,7 +303,7 @@ def create_manual_booking():
                                      value=datetime.datetime.now().date() + datetime.timedelta(days=1), 
                                      key="manual_delivery_date")
         vehicle_type = static_selectbox("Vehicle Type", 
-                                   ["Mini Truck", "Small Truck", "Medium Truck", "Large Truck", "Container", "Trailer"],
+                                   ["Tata Ace - 7ft", "Bolero / Dost - 8ft", "12 ft", "14 ft", "17 ft", "20 ft", "24 ft", "32 ft"],
                                    key="manual_vehicle_type")
         trip_type = static_selectbox("Trip Type", ["Local", "Long Distance", "Contract"], key="manual_trip_type")
         distance_km = st.number_input("Distance (KM)", min_value=0.0, value=0.0, key="manual_distance")
@@ -294,6 +320,36 @@ def create_manual_booking():
         base_amount = st.number_input("Base Amount (₹)*", min_value=0.0, value=0.0, key="manual_amount")
         payment_terms = static_selectbox("Payment Terms (Days)", [30, 45, 60, 90], key="manual_payment_terms")
         priority = static_selectbox("Priority", ["Normal", "High", "Urgent"], key="manual_priority")
+    
+    # Contract-specific fields
+    if trip_type == "Contract":
+        st.markdown("---")
+        st.markdown("**Contract Details**")
+        
+        contract_col1, contract_col2, contract_col3 = st.columns(3)
+        
+        with contract_col1:
+            contract_start_date = st.date_input("Contract Start Date*", value=datetime.datetime.now().date(), key="contract_start")
+            contract_period = st.selectbox("Contract Period", ["Daily", "Weekly", "Monthly", "Quarterly"], key="contract_period")
+        
+        with contract_col2:
+            contract_end_date = st.date_input("Contract End Date*", value=datetime.datetime.now().date() + datetime.timedelta(days=30), key="contract_end")
+            billing_frequency = st.selectbox("Billing Frequency", ["Per Trip", "Weekly", "Monthly"], key="billing_freq")
+        
+        with contract_col3:
+            contract_rate = st.number_input("Contract Rate (₹)", min_value=0.0, value=0.0, key="contract_rate", 
+                                           help="Rate per trip/day/month as per contract period")
+            contract_number = st.text_input("Contract Number", key="contract_number", help="Customer contract reference")
+        
+        # Contract terms
+        contract_terms = st.text_area("Contract Terms & Conditions", key="contract_terms",
+                                     placeholder="Special terms, conditions, or requirements for this contract")
+    else:
+        # Set default values for non-contract bookings
+        contract_start_date = contract_end_date = None
+        contract_period = billing_frequency = ""
+        contract_rate = 0.0
+        contract_number = contract_terms = ""
         gst_applicable = st.checkbox("GST Applicable", value=True, key="manual_gst")
         advance_payment = st.number_input("Advance Payment (₹)", min_value=0.0, value=0.0, key="manual_advance")
     
@@ -512,7 +568,15 @@ def create_manual_booking():
             'status': 'Created',
             'priority': priority,
             'created_date': datetime.datetime.now(),
-            'can_edit': True
+            'can_edit': True,
+            # Contract fields
+            'contract_start_date': contract_start_date,
+            'contract_end_date': contract_end_date,
+            'contract_period': contract_period,
+            'billing_frequency': billing_frequency,
+            'contract_rate': contract_rate,
+            'contract_number': contract_number,
+            'contract_terms': contract_terms
         }
         
         # Save to database
@@ -542,36 +606,40 @@ def view_bookings():
         st.info("No bookings found. Create your first booking in the 'Create Booking' tab.")
         return
     
-    # Filters
-    col1, col2, col3, col4 = st.columns(4)
+    # Filters - consolidated to single line
+    filter_col1, filter_col2, filter_col3, filter_col4, filter_col5 = st.columns(5)
     
-    with col1:
+    with filter_col1:
         status_filter = static_selectbox(
-            "Filter by Status",
+            "Status",
             ["All", "Created", "Confirmed", "Dispatched", "In Transit", "Delivered", "POD Captured", "Cancelled"],
             key="booking_status_filter"
         )
     
-    with col2:
+    with filter_col2:
         customer_filter = searchable_selectbox(
-            "Filter by Customer",
+            "Customer",
             ["All"] + list(set([b['customer_name'] for b in st.session_state.bookings])),
             key="booking_customer_filter"
         )
     
-    with col3:
+    with filter_col3:
         trip_type_filter = static_selectbox(
-            "Filter by Trip Type",
+            "Trip Type",
             ["All", "Local", "Long Distance", "Contract"],
             key="booking_trip_filter"
         )
     
-    with col4:
+    with filter_col4:
         date_filter = st.date_input(
             "From Date",
             value=datetime.datetime.now() - datetime.timedelta(days=30),
             key="booking_date_filter"
         )
+    
+    with filter_col5:
+        # Show count
+        st.metric("Total", len(st.session_state.bookings))
     
     # Filter bookings
     filtered_bookings = st.session_state.bookings
@@ -652,12 +720,23 @@ def view_bookings():
                     # Keep on View Bookings tab
                     st.session_state.booking_active_tab = "View Bookings"
                     # Find and update the actual booking in session state
+                    old_status = booking['status']
                     for i, b in enumerate(st.session_state.bookings):
                         if b['id'] == booking['id']:
                             st.session_state.bookings[i]['status'] = 'Dispatched'
                             st.session_state.bookings[i]['can_edit'] = False  # Lock editing after dispatch
                             booking['status'] = 'Dispatched'  # Update local reference too
                             booking['can_edit'] = False
+                            # Track status change
+                            from .notes import track_status_change
+                            track_status_change(
+                                record_id=booking['id'],
+                                record_type='booking',
+                                old_status=old_status,
+                                new_status='Dispatched',
+                                notes='Booking dispatched to driver',
+                                additional_data={'booking_number': booking['booking_number']}
+                            )
                             # Update in database (don't insert new record)
                             from database import update_in_database
                             update_in_database('bookings', {'status': 'Dispatched', 'can_edit': False}, booking['id'])
@@ -676,6 +755,19 @@ def view_bookings():
                             st.session_state.bookings[i]['pod_date'] = datetime.datetime.now()
                             booking['status'] = 'POD Generated'  # Update local reference too
                             booking['pod_date'] = datetime.datetime.now()
+                            # Track status change
+                            from .notes import track_status_change
+                            track_status_change(
+                                record_id=booking['id'],
+                                record_type='booking',
+                                old_status='Dispatched',
+                                new_status='POD Generated',
+                                notes='Proof of delivery generated',
+                                additional_data={
+                                    'booking_number': booking['booking_number'],
+                                    'pod_date': datetime.datetime.now().isoformat()
+                                }
+                            )
                             # Update in database (don't insert new record)
                             from database import update_in_database
                             update_in_database('bookings', {
@@ -742,12 +834,26 @@ def view_bookings():
                     # Keep on View Bookings tab
                     st.session_state.booking_active_tab = "View Bookings"
                     # Find and update the actual booking in session state
+                    old_status = booking['status']
                     for i, b in enumerate(st.session_state.bookings):
                         if b['id'] == booking['id']:
                             st.session_state.bookings[i]['status'] = 'Cancelled'
                             st.session_state.bookings[i]['cancelled_date'] = datetime.datetime.now()
                             booking['status'] = 'Cancelled'  # Update local reference too
                             booking['cancelled_date'] = datetime.datetime.now()
+                            # Track status change
+                            from .notes import track_status_change
+                            track_status_change(
+                                record_id=booking['id'],
+                                record_type='booking',
+                                old_status=old_status,
+                                new_status='Cancelled',
+                                notes='Booking cancelled by user',
+                                additional_data={
+                                    'booking_number': booking['booking_number'],
+                                    'cancelled_date': datetime.datetime.now().isoformat()
+                                }
+                            )
                             # Update in database (don't insert new record)
                             from database import update_in_database
                             update_in_database('bookings', {
@@ -769,3 +875,184 @@ def view_bookings():
             file_name=f"bookings_{datetime.datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv"
         )
+
+def create_cash_booking():
+    """Create a simple cash booking for immediate trips"""
+    st.subheader("💰 Cash Booking - Quick Entry")
+    st.info("For immediate cash-based bookings with simplified entry")
+    
+    # Basic details in a compact form
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**Trip Details**")
+        pickup_location = st.text_input("From*", key="cash_pickup")
+        delivery_location = st.text_input("To*", key="cash_delivery") 
+        vehicle_type = static_selectbox("Vehicle", 
+                                       ["Tata Ace - 7ft", "Bolero / Dost - 8ft", "12 ft", "14 ft", "17 ft", "20 ft", "24 ft", "32 ft"],
+                                       key="cash_vehicle")
+        distance_km = st.number_input("Distance (KM)", min_value=0.0, value=0.0, key="cash_distance")
+    
+    with col2:
+        st.markdown("**Customer & Payment**")
+        customer_name = st.text_input("Customer Name*", key="cash_customer_name")
+        customer_phone = st.text_input("Phone*", key="cash_customer_phone")
+        cash_amount = st.number_input("Cash Amount (₹)*", min_value=0.0, value=0.0, key="cash_amount")
+        advance_received = st.number_input("Advance Received (₹)", min_value=0.0, value=0.0, key="cash_advance")
+    
+    # Optional details
+    with st.expander("📋 Additional Details (Optional)"):
+        detail_col1, detail_col2 = st.columns(2)
+        
+        with detail_col1:
+            pickup_time = st.time_input("Pickup Time", value=datetime.time(9, 0), key="cash_time")
+            cargo_details = st.text_input("Cargo Details", key="cash_cargo")
+            reference_number = st.text_input("Reference", key="cash_reference")
+        
+        with detail_col2:
+            pickup_contact = st.text_input("Pickup Contact", key="cash_pickup_contact")
+            delivery_contact = st.text_input("Delivery Contact", key="cash_delivery_contact")
+            special_notes = st.text_area("Notes", key="cash_notes", help="Special instructions or remarks")
+    
+    # Vehicle assignment
+    st.markdown("**Vehicle Assignment**")
+    assignment_col1, assignment_col2 = st.columns(2)
+    
+    with assignment_col1:
+        available_vehicles = [v['registration_number'] for v in st.session_state.vehicles if v.get('status') != 'Maintenance']
+        if available_vehicles:
+            assigned_vehicle = searchable_selectbox("Vehicle", ["Not Assigned"] + available_vehicles, key="cash_assigned_vehicle")
+        else:
+            assigned_vehicle = "Not Assigned"
+            st.warning("No vehicles available")
+    
+    with assignment_col2:
+        available_drivers = [d['name'] for d in st.session_state.drivers if d.get('status') == 'Available']
+        if available_drivers:
+            assigned_driver = searchable_selectbox("Driver", ["Not Assigned"] + available_drivers, key="cash_assigned_driver")
+        else:
+            assigned_driver = "Not Assigned"
+            st.warning("No drivers available")
+    
+    # Summary
+    balance_amount = cash_amount - advance_received
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total Amount", f"₹{cash_amount:,.2f}")
+    with col2:
+        st.metric("Advance Received", f"₹{advance_received:,.2f}")
+    with col3:
+        st.metric("Balance Due", f"₹{balance_amount:,.2f}")
+    
+    # Create booking button
+    if st.button("💾 Create Cash Booking", type="primary"):
+        # Validation
+        if not all([pickup_location, delivery_location, customer_name, customer_phone, cash_amount > 0]):
+            st.error("Please fill all required fields (*)")
+            return
+        
+        if customer_phone and not validate_mobile_number(customer_phone):
+            st.error("Please enter a valid 10-digit mobile number")
+            return
+        
+        # Create customer (cash customers are typically one-time)
+        customer_id = str(uuid.uuid4())
+        cash_customer = {
+            'id': customer_id,
+            'name': customer_name,
+            'phone': customer_phone,
+            'email': '',
+            'address': '',
+            'gst_number': '',
+            'pan_number': '',
+            'payment_terms': 0,  # Immediate payment
+            'customer_type': 'Cash',
+            'created_date': datetime.datetime.now()
+        }
+        
+        # Add customer to session state
+        if 'customers' not in st.session_state:
+            st.session_state.customers = []
+        st.session_state.customers.append(cash_customer)
+        
+        # Generate booking number
+        from app import generate_booking_number
+        booking_number = generate_booking_number()
+        
+        # Create cash booking
+        cash_booking = {
+            'id': str(uuid.uuid4()),
+            'booking_number': booking_number,
+            'quotation_id': None,
+            'quotation_number': None,
+            'customer_id': customer_id,
+            'customer_name': customer_name,
+            'pickup_location': pickup_location,
+            'delivery_location': delivery_location,
+            'pickup_date': datetime.datetime.now().date(),
+            'pickup_time': pickup_time,
+            'delivery_date': datetime.datetime.now().date(),
+            'vehicle_type': vehicle_type,
+            'assigned_vehicle': assigned_vehicle,
+            'assigned_driver': assigned_driver,
+            'distance_km': distance_km,
+            'trip_type': 'Cash',
+            'cargo_details': cargo_details,
+            'weight_capacity': 0,
+            'weight_unit': 'kg',
+            'reference_number': reference_number,
+            'special_instructions': special_notes,
+            'pickup_contact': pickup_contact,
+            'pickup_phone': customer_phone,
+            'delivery_contact': delivery_contact,
+            'delivery_phone': '',
+            'base_amount': cash_amount,
+            'loading_charges': 0,
+            'unloading_charges': 0,
+            'airport_pass_charges': 0,
+            'halting_charges': 0,
+            'fuel_charges': 0,
+            'toll_charges': 0,
+            'other_charges': 0,
+            'discount': 0,
+            'gst_applicable': False,  # Cash bookings typically no GST
+            'gst_amount': 0,
+            'total_amount': cash_amount,
+            'advance_payment': advance_received,
+            'balance_amount': balance_amount,
+            'payment_terms': 0,
+            'status': 'Confirmed' if advance_received > 0 else 'Created',
+            'priority': 'Normal',
+            'booking_type': 'Cash',
+            'created_date': datetime.datetime.now(),
+            'can_edit': True
+        }
+        
+        # Save booking
+        from app import save_booking
+        if save_booking(cash_booking):
+            # Add to session state for immediate display
+            if 'bookings' not in st.session_state:
+                st.session_state.bookings = []
+            st.session_state.bookings.append(cash_booking)
+            
+            st.success(f"✅ Cash Booking {booking_number} created successfully!")
+            
+            # Show booking summary
+            st.info(f"📋 **Booking Summary:**\n"
+                   f"- Booking Number: {booking_number}\n"
+                   f"- Customer: {customer_name} ({customer_phone})\n"
+                   f"- Route: {pickup_location} → {delivery_location}\n"
+                   f"- Vehicle: {vehicle_type}\n"
+                   f"- Amount: ₹{cash_amount:,.2f}\n"
+                   f"- Status: {'Confirmed' if advance_received > 0 else 'Created'}")
+            
+            # Clear form fields
+            for key in st.session_state.keys():
+                if key.startswith('cash_'):
+                    del st.session_state[key]
+            
+            st.rerun()
+        else:
+            st.error("Failed to save booking. Please try again.")

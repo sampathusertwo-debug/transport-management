@@ -4,11 +4,14 @@ import datetime
 import uuid
 from typing import Dict, List
 from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.lib.units import inch
 import io
+import requests
+import tempfile
+import os
 from .quotations import safe_get_date
 
 def update_payment_status():
@@ -16,26 +19,50 @@ def update_payment_status():
     for invoice in st.session_state.invoices:
         # Calculate total payments for this invoice
         total_payments = sum(
-            payment['amount'] for payment in st.session_state.customer_payments 
+            float(payment['amount']) for payment in st.session_state.customer_payments 
             if payment.get('invoice_id') == invoice['id']
         )
         
-        # Update outstanding amount
-        invoice['outstanding_amount'] = invoice['total_amount'] - total_payments
+        # Store old status for tracking
+        old_status = invoice['status']
+        
+        # Update outstanding amount (ensure both are floats)
+        invoice_total = float(invoice['total_amount'])
+        invoice['outstanding_amount'] = invoice_total - total_payments
         
         # Update status based on payments
+        new_status = None
         if total_payments == 0:
-            invoice['status'] = 'Generated'
-        elif total_payments >= invoice['total_amount']:
-            invoice['status'] = 'Paid'
+            new_status = 'Generated'
+        elif total_payments >= invoice_total:
+            new_status = 'Paid'
         else:
-            invoice['status'] = 'Partially Paid'
+            new_status = 'Partially Paid'
         
         # Check for overdue (if due date passed and not fully paid)
         if (invoice.get('due_date') and 
             datetime.datetime.now().date() > invoice['due_date'] and 
-            total_payments < invoice['total_amount']):
-            invoice['status'] = 'Overdue'
+            total_payments < invoice_total):
+            new_status = 'Overdue'
+        
+        # Track status change if status changed
+        if old_status != new_status:
+            invoice['status'] = new_status
+            from .notes import track_status_change
+            track_status_change(
+                record_id=invoice['id'],
+                record_type='invoice',
+                old_status=old_status,
+                new_status=new_status,
+                notes=f'Payment status updated - Outstanding: ₹{invoice["outstanding_amount"]:,.2f}',
+                changed_by='System',
+                additional_data={
+                    'invoice_number': invoice['invoice_number'],
+                    'total_payments': total_payments,
+                    'outstanding_amount': invoice['outstanding_amount'],
+                    'payment_update': True
+                }
+            )
 
 def show():
     """Display the invoicing module"""
@@ -72,6 +99,64 @@ def create_invoice():
     
     if not eligible_bookings:
         st.warning("No eligible bookings found. Only bookings with POD generated or delivered status can be invoiced.")
+        return
+    
+    # Display eligible bookings in a searchable table format
+    st.markdown("**Select Booking to Invoice:**")
+    
+    # Search and filter
+    search_term = st.text_input("🔍 Search bookings by number, customer, or route", key="booking_search")
+    
+    # Filter bookings
+    filtered_bookings = []
+    for booking in eligible_bookings:
+        if not search_term or \
+           search_term.lower() in booking['booking_number'].lower() or \
+           search_term.lower() in booking['customer_name'].lower() or \
+           search_term.lower() in booking['pickup_location'].lower() or \
+           search_term.lower() in booking['delivery_location'].lower():
+            filtered_bookings.append(booking)
+    
+    # Display filtered bookings
+    for booking in filtered_bookings:
+        # Check if already invoiced
+        existing_invoice = next((inv for inv in st.session_state.invoices if inv.get('booking_id') == booking['id']), None)
+        
+        if existing_invoice:
+            status_text = f"✅ Already Invoiced ({existing_invoice['invoice_number']})"
+            disabled = True
+        else:
+            status_text = "📋 Ready to Invoice"
+            disabled = False
+        
+        with st.expander(f"{status_text} - {booking['booking_number']} - {booking['customer_name']} - ₹{booking['total_amount']:,.2f}"):
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.write(f"**Booking Number:** {booking['booking_number']}")
+                st.write(f"**Customer:** {booking['customer_name']}")
+                st.write(f"**Route:** {booking['pickup_location']} → {booking['delivery_location']}")
+                st.write(f"**Vehicle Type:** {booking['vehicle_type']}")
+            
+            with col2:
+                st.write(f"**Status:** {booking['status']}")
+                st.write(f"**Amount:** ₹{booking['total_amount']:,.2f}")
+                st.write(f"**Trip Type:** {booking['trip_type']}")
+                st.write(f"**Distance:** {booking['distance_km']} KM")
+            
+            with col3:
+                if not disabled:
+                    if st.button(f"Create Invoice", key=f"invoice_booking_{booking['id']}", type="primary"):
+                        create_invoice_from_booking(booking)
+                        st.rerun()
+                else:
+                    st.info("Invoice already created for this booking")
+                    if existing_invoice and st.button(f"View Invoice {existing_invoice['invoice_number']}", key=f"view_invoice_{existing_invoice['id']}"):
+                        st.session_state.selected_invoice_id = existing_invoice['id']
+                        st.success(f"Navigate to View Invoices tab to see invoice {existing_invoice['invoice_number']}")
+    
+    if not filtered_bookings:
+        st.info("No bookings match your search criteria.")
         return
     
     st.markdown("**Select Booking to Invoice**")
@@ -172,38 +257,123 @@ def create_invoice_from_booking(booking):
             dsr_number = generate_dsr_number()
             st.write(f"**DSR Number:** {dsr_number}")
     
+    # Charges breakdown from booking
+    st.markdown("**Charges Breakdown (From Booking)**")
+    
+    # Get booking charges with fallback to 0 and ensure float conversion with None handling
+    def safe_float(value, default=0.0):
+        """Safely convert value to float, handling None and invalid values"""
+        if value is None:
+            return default
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return default
+    
+    booking_base = safe_float(booking.get('base_amount'), 0.0)
+    booking_loading = safe_float(booking.get('loading_charges'), 0.0)
+    booking_unloading = safe_float(booking.get('unloading_charges'), 0.0)
+    booking_airport_pass = safe_float(booking.get('airport_pass_charges'), 0.0)
+    booking_halting = safe_float(booking.get('halting_charges'), 0.0)
+    booking_fuel = safe_float(booking.get('fuel_charges'), 0.0)
+    booking_toll = safe_float(booking.get('toll_charges'), 0.0)
+    booking_other = safe_float(booking.get('other_charges'), 0.0)
+    booking_discount = safe_float(booking.get('discount'), 0.0)
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Base Amount", f"₹{booking_base:,.2f}")
+        st.metric("Loading Charges", f"₹{booking_loading:,.2f}")
+    
+    with col2:
+        st.metric("Unloading Charges", f"₹{booking_unloading:,.2f}")
+        st.metric("Airport Pass", f"₹{booking_airport_pass:,.2f}")
+    
+    with col3:
+        st.metric("Fuel Charges", f"₹{booking_fuel:,.2f}")
+        st.metric("Toll Charges", f"₹{booking_toll:,.2f}")
+    
+    with col4:
+        st.metric("Other Charges", f"₹{booking_other:,.2f}")
+        st.metric("Discount", f"₹{booking_discount:,.2f}")
+    
     # Additional charges/adjustments
     st.markdown("**Additional Charges & Adjustments**")
+    st.info("Add any extra charges beyond what was in the original booking")
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        additional_fuel = st.number_input("Additional Fuel Charges (₹)", min_value=0.0, value=0.0, key="invoice_fuel")
-        additional_toll = st.number_input("Additional Toll Charges (₹)", min_value=0.0, value=0.0, key="invoice_toll")
+        additional_fuel = st.number_input("Extra Fuel Charges (₹)", min_value=0.0, value=0.0, key="invoice_fuel")
+        additional_toll = st.number_input("Extra Toll Charges (₹)", min_value=0.0, value=0.0, key="invoice_toll")
     
     with col2:
-        additional_loading = st.number_input("Additional Loading Charges (₹)", min_value=0.0, value=0.0, key="invoice_loading")
+        additional_loading = st.number_input("Extra Loading Charges (₹)", min_value=0.0, value=0.0, key="invoice_loading")
         additional_detention = st.number_input("Detention Charges (₹)", min_value=0.0, value=0.0, key="invoice_detention")
     
     with col3:
         additional_misc = st.number_input("Miscellaneous Charges (₹)", min_value=0.0, value=0.0, key="invoice_misc")
-        discount = st.number_input("Discount (₹)", min_value=0.0, value=0.0, key="invoice_discount")
+        extra_discount = st.number_input("Extra Discount (₹)", min_value=0.0, value=0.0, key="invoice_discount")
     
     # Calculate amounts (ensure all are float for compatibility)
-    base_amount = float(booking['total_amount'])
-    additional_charges = additional_fuel + additional_toll + additional_loading + additional_detention + additional_misc
-    subtotal = base_amount + additional_charges - discount
+    # Use booking's base amount (not total)
+    base_amount = float(booking_base)
+    
+    # All booking charges
+    booking_charges_total = float(booking_loading + booking_unloading + booking_airport_pass + booking_halting + booking_fuel + booking_toll + booking_other)
+    
+    # Additional charges from invoice form
+    additional_charges = float(additional_fuel + additional_toll + additional_loading + additional_detention + additional_misc)
+    
+    # Total discounts
+    total_discount = float(booking_discount + extra_discount)
+    
+    # Calculate subtotal: base + booking charges + additional charges - total discount
+    subtotal = float(base_amount + booking_charges_total + additional_charges - total_discount)
     
     # GST calculation (only for GST invoices)
     if invoice_type == "GST Invoice":
         gst_applicable = True
-        gst_rate = st.selectbox("GST Rate (%)", [5, 12, 18, 28], index=2, key="gst_rate")
-        gst_amount = subtotal * (gst_rate / 100)
-        total_amount = subtotal + gst_amount
+        
+        # Get customer GST info if available
+        customer_data = next((c for c in st.session_state.customers if c['id'] == booking['customer_id']), None)
+        customer_gst = customer_data.get('gst_number', '') if customer_data else ''
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            gst_rate = st.selectbox("GST Rate (%)", [5, 12, 18, 28], index=2, key="gst_rate")
+        
+        with col2:
+            # Show customer GST status
+            if customer_gst:
+                st.success(f"✅ Customer GST: {customer_gst}")
+            else:
+                st.warning("⚠️ No customer GST number on file")
+        
+        with col3:
+            # GST calculation options
+            gst_type = st.selectbox("GST Type", ["CGST+SGST", "IGST"], key="gst_type",
+                                   help="CGST+SGST for same state, IGST for interstate")
+        
+        gst_amount = float(subtotal * (gst_rate / 100))
+        total_amount = float(subtotal + gst_amount)
+        
+        # Display GST breakdown
+        st.markdown(f"**GST Breakdown ({gst_type}):**")
+        if gst_type == "CGST+SGST":
+            cgst = sgst = gst_amount / 2
+            st.write(f"CGST ({gst_rate/2}%): ₹{cgst:,.2f}")
+            st.write(f"SGST ({gst_rate/2}%): ₹{sgst:,.2f}")
+        else:
+            st.write(f"IGST ({gst_rate}%): ₹{gst_amount:,.2f}")
     else:
         gst_applicable = False
-        gst_amount = 0
-        total_amount = subtotal
+        gst_rate = 0
+        gst_amount = 0.0
+        gst_type = ""
+        total_amount = float(subtotal)
     
     # Display calculated amounts
     st.markdown("**Invoice Summary**")
@@ -217,9 +387,9 @@ def create_invoice_from_booking(booking):
     
     with col3:
         if gst_applicable:
-            st.metric(f"GST ({gst_rate if gst_applicable else 0}%)", f"₹{gst_amount:,.2f}")
+            st.metric(f"GST ({gst_rate}%)", f"₹{gst_amount:,.2f}")
         else:
-            st.metric("Discount", f"₹{discount:,.2f}")
+            st.metric("Total Discount", f"₹{total_discount:,.2f}")
     
     with col4:
         st.metric("Total Amount", f"₹{total_amount:,.2f}", delta=f"₹{total_amount - base_amount:,.2f}")
@@ -270,17 +440,29 @@ def create_invoice_from_booking(booking):
             'driver_name': booking.get('assigned_driver', ''),
             'distance_km': booking['distance_km'],
             'base_amount': base_amount,
+            # Booking charges
+            'booking_loading_charges': booking_loading,
+            'booking_unloading_charges': booking_unloading,
+            'booking_airport_pass_charges': booking_airport_pass,
+            'booking_halting_charges': booking_halting,
+            'booking_fuel_charges': booking_fuel,
+            'booking_toll_charges': booking_toll,
+            'booking_other_charges': booking_other,
+            'booking_discount': booking_discount,
+            # Additional charges from invoice
             'additional_fuel': additional_fuel,
             'additional_toll': additional_toll,
             'additional_loading': additional_loading,
             'additional_detention': additional_detention,
             'additional_misc': additional_misc,
             'additional_charges': additional_charges,
-            'discount': discount,
+            'extra_discount': extra_discount,
+            'total_discount': total_discount,
             'subtotal': subtotal,
             'gst_applicable': gst_applicable,
             'gst_rate': gst_rate if gst_applicable else 0,
             'gst_amount': gst_amount,
+            'gst_type': locals().get('gst_type', ''),
             'total_amount': total_amount,
             'payment_terms': booking['payment_terms'],
             'invoice_notes': invoice_notes,
@@ -307,9 +489,40 @@ def create_invoice_from_booking(booking):
                 st.session_state.invoices = []
             st.session_state.invoices.append(invoice)
             
+            # Track status change for new invoice
+            from .notes import track_status_change
+            track_status_change(
+                record_id=invoice['id'],
+                record_type='invoice',
+                old_status='',
+                new_status='Generated',
+                notes=f'Invoice generated from booking {booking["booking_number"]}',
+                additional_data={
+                    'invoice_number': invoice['invoice_number'],
+                    'booking_number': booking['booking_number'],
+                    'invoice_type': invoice_type,
+                    'customer_name': invoice['customer_name'],
+                    'total_amount': total_amount
+                }
+            )
+            
             # Update booking status
+            old_booking_status = booking['status']
             booking['status'] = 'Invoiced'
             booking['invoiced_date'] = datetime.datetime.now()
+            
+            # Track booking status change
+            track_status_change(
+                record_id=booking['id'],
+                record_type='booking',
+                old_status=old_booking_status,
+                new_status='Invoiced',
+                notes=f'Booking invoiced - Invoice #{invoice["invoice_number"]} generated',
+                additional_data={
+                    'booking_number': booking['booking_number'],
+                    'invoice_number': invoice['invoice_number']
+                }
+            )
             
             # Clear selected booking
             if 'selected_booking_id' in st.session_state:
@@ -401,8 +614,8 @@ def show_invoice_preview(invoice):
             invoice_data.append(["Detention Charges", f"₹{invoice['additional_detention']:,.2f}"])
         if invoice['additional_misc'] > 0:
             invoice_data.append(["Miscellaneous Charges", f"₹{invoice['additional_misc']:,.2f}"])
-        if invoice['discount'] > 0:
-            invoice_data.append(["Discount", f"-₹{invoice['discount']:,.2f}"])
+        if invoice.get('total_discount', 0) > 0:
+            invoice_data.append(["Total Discount", f"-₹{invoice['total_discount']:,.2f}"])
         
         invoice_data.append(["Subtotal", f"₹{invoice['subtotal']:,.2f}"])
         
@@ -504,7 +717,7 @@ def view_invoices():
         st.metric("Total Amount", f"₹{total_amount:,.2f}")
     
     with col3:
-        outstanding_amount = sum(inv['outstanding_amount'] for inv in filtered_invoices)
+        outstanding_amount = sum(float(inv['outstanding_amount']) for inv in filtered_invoices)
         st.metric("Outstanding", f"₹{outstanding_amount:,.2f}")
     
     with col4:
@@ -561,7 +774,74 @@ def view_invoices():
             
             with col1:
                 if st.button(f"View Details", key=f"view_{invoice['id']}"):
-                    show_invoice_preview(invoice)
+                    st.session_state[f"show_invoice_details_{invoice['id']}"] = True
+                    st.rerun()
+            
+            # Show detailed view if requested
+            if st.session_state.get(f"show_invoice_details_{invoice['id']}", False):
+                st.markdown("---")
+                st.markdown("**📋 Detailed Invoice Breakdown:**")
+                
+                # Invoice information
+                detail_col1, detail_col2, detail_col3 = st.columns(3)
+                
+                with detail_col1:
+                    st.markdown("**Basic Information**")
+                    st.write(f"Invoice Number: {invoice['invoice_number']}")
+                    st.write(f"Invoice Type: {invoice['invoice_type']}")
+                    st.write(f"Movement Type: {invoice['movement_type']}")
+                    st.write(f"Invoice Date: {invoice['invoice_date']}")
+                    st.write(f"Due Date: {invoice['due_date']}")
+                
+                with detail_col2:
+                    st.markdown("**Trip Information**")
+                    st.write(f"Booking: {invoice['booking_number']}")
+                    st.write(f"Pickup: {invoice['pickup_location']}")
+                    st.write(f"Delivery: {invoice['delivery_location']}")
+                    st.write(f"Distance: {invoice['distance_km']} KM")
+                    if invoice.get('vehicle_number'):
+                        st.write(f"Vehicle: {invoice['vehicle_number']}")
+                
+                with detail_col3:
+                    st.markdown("**Financial Summary**")
+                    st.write(f"Base Amount: ₹{invoice['base_amount']:,.2f}")
+                    st.write(f"Total Charges: ₹{invoice['subtotal']:,.2f}")
+                    if invoice.get('gst_applicable'):
+                        st.write(f"GST ({invoice['gst_rate']}%): ₹{invoice['gst_amount']:,.2f}")
+                    st.write(f"**Total: ₹{invoice['total_amount']:,.2f}**")
+                    st.write(f"**Outstanding: ₹{invoice['outstanding_amount']:,.2f}**")
+                
+                # Charges breakdown
+                if invoice.get('booking_loading_charges', 0) > 0 or invoice.get('additional_fuel', 0) > 0:
+                    st.markdown("**Charges Breakdown:**")
+                    charges_col1, charges_col2 = st.columns(2)
+                    
+                    with charges_col1:
+                        st.markdown("*From Booking:*")
+                        if invoice.get('booking_loading_charges', 0) > 0:
+                            st.write(f"Loading: ₹{invoice['booking_loading_charges']:,.2f}")
+                        if invoice.get('booking_unloading_charges', 0) > 0:
+                            st.write(f"Unloading: ₹{invoice['booking_unloading_charges']:,.2f}")
+                        if invoice.get('booking_fuel_charges', 0) > 0:
+                            st.write(f"Fuel: ₹{invoice['booking_fuel_charges']:,.2f}")
+                        if invoice.get('booking_toll_charges', 0) > 0:
+                            st.write(f"Toll: ₹{invoice['booking_toll_charges']:,.2f}")
+                    
+                    with charges_col2:
+                        st.markdown("*Additional:*")
+                        if invoice.get('additional_fuel', 0) > 0:
+                            st.write(f"Extra Fuel: ₹{invoice['additional_fuel']:,.2f}")
+                        if invoice.get('additional_loading', 0) > 0:
+                            st.write(f"Extra Loading: ₹{invoice['additional_loading']:,.2f}")
+                        if invoice.get('additional_detention', 0) > 0:
+                            st.write(f"Detention: ₹{invoice['additional_detention']:,.2f}")
+                        if invoice.get('total_discount', 0) > 0:
+                            st.write(f"Discount: -₹{invoice['total_discount']:,.2f}")
+                
+                # Close button
+                if st.button(f"Close Details", key=f"close_details_{invoice['id']}"):
+                    del st.session_state[f"show_invoice_details_{invoice['id']}"]
+                    st.rerun()
             
             with col2:
                 # PDF Generation Button
@@ -620,128 +900,376 @@ def view_invoices():
             mime="text/csv"
         )
 
+def download_logo_image():
+    """Download and cache the S TRANZ logo image"""
+    logo_url = "https://www.stranz.in/hs-fs/hubfs/photo_2025-10-25_10-14-37.jpg?width=600"
+    
+    try:
+        # Create a temporary file to store the logo
+        temp_dir = tempfile.gettempdir()
+        logo_path = os.path.join(temp_dir, "stranz_logo.jpg")
+        
+        # Check if logo already exists and is recent (less than 1 day old)
+        if os.path.exists(logo_path):
+            file_age = datetime.datetime.now() - datetime.datetime.fromtimestamp(os.path.getmtime(logo_path))
+            if file_age.days < 1:
+                return logo_path
+        
+        # Download the logo
+        response = requests.get(logo_url, timeout=10)
+        response.raise_for_status()
+        
+        # Save the logo
+        with open(logo_path, 'wb') as f:
+            f.write(response.content)
+        
+        return logo_path
+    
+    except Exception as e:
+        print(f"Warning: Could not download logo: {str(e)}")
+        return None
+
 def generate_invoice_pdf(invoice):
-    """Generate PDF for invoice"""
+    """Generate PDF for invoice in S TRANZ format"""
+    
+    def safe_float(value, default=0.0):
+        """Safely convert value to float, handling None and invalid values"""
+        if value is None:
+            return default
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return default
+    
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=18)
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     
     # Container for the 'Flowable' objects
     elements = []
     styles = getSampleStyleSheet()
     
     # Custom styles
-    title_style = ParagraphStyle(
-        'CustomTitle',
-        parent=styles['Heading1'],
-        fontSize=18,
-        spaceAfter=30,
-        alignment=1  # Center alignment
+    company_style = ParagraphStyle(
+        'CompanyStyle',
+        parent=styles['Normal'],
+        fontSize=14,
+        fontName='Helvetica-Bold',
+        spaceAfter=6,
+        textColor=colors.black
     )
     
-    # Header
-    title = Paragraph("STRANZ TRANSPORT MANAGEMENT", title_style)
-    elements.append(title)
+    invoice_title_style = ParagraphStyle(
+        'InvoiceTitle',
+        parent=styles['Normal'],
+        fontSize=24,
+        fontName='Helvetica-Bold',
+        spaceAfter=12,
+        alignment=2,  # Right alignment
+        textColor=colors.black
+    )
+    
+    section_style = ParagraphStyle(
+        'SectionStyle',
+        parent=styles['Normal'],
+        fontSize=10,
+        fontName='Helvetica-Bold',
+        spaceAfter=6,
+        textColor=colors.black
+    )
+    
+    # Header with company info and logo
+    logo_path = download_logo_image()
+    
+    # Prepare logo image if available
+    logo_img = None
+    if logo_path and os.path.exists(logo_path):
+        try:
+            logo_img = Image(logo_path, width=2*inch, height=1*inch)
+            logo_img.hAlign = 'RIGHT'
+        except Exception as e:
+            print(f"Warning: Could not load logo image: {str(e)}")
+            logo_img = None
+    
+    # Create header with company info and logo/invoice title
+    if logo_img:
+        header_data = [
+            [
+                # Company Info Column
+                Paragraph("""<font color="black"><b>S TRANZ</b><br/>
+                NO.22, PADMALAYAM<br/>
+                1st STREET, SARASWATHIPURAM,<br/>
+                CHROMPET CHENNAI - 600044<br/>
+                GSTIN: 33CGPP57873Q1ZZ<br/>
+                Email: info.stranz@gmail.com<br/>
+                Phone: +91 73580 47373<br/>
+                www.Stranz.in</font>""", company_style),
+                # Logo and Invoice title column
+                [logo_img, Paragraph('<font size="24"><b>INVOICE</b></font>', invoice_title_style)]
+            ]
+        ]
+        header_table = Table(header_data, colWidths=[3.5*inch, 3.5*inch])
+    else:
+        # Fallback without logo
+        header_data = [
+            [
+                # Company Info Column
+                Paragraph("""<font color="black"><b>S TRANZ</b><br/>
+                NO.22, PADMALAYAM<br/>
+                1st STREET, SARASWATHIPURAM,<br/>
+                CHROMPET CHENNAI - 600044<br/>
+                GSTIN: 33CGPP57873Q1ZZ<br/>
+                Email: info.stranz@gmail.com<br/>
+                Phone: +91 73580 47373<br/>
+                www.Stranz.in</font>""", company_style),
+                # Invoice title
+                Paragraph('<font size="24"><b>INVOICE</b></font>', invoice_title_style)
+            ]
+        ]
+        header_table = Table(header_data, colWidths=[4*inch, 3*inch])
+    
+    header_table.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+        ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+    ]))
+    
+    elements.append(header_table)
     elements.append(Spacer(1, 12))
     
-    # Invoice details
-    invoice_title = Paragraph(f"<b>{invoice['invoice_type'].upper()}: {invoice['invoice_number']}</b>", styles['Heading2'])
-    elements.append(invoice_title)
+    # Tax line
+    tax_line = Paragraph('<b>TAX PAYABLE ON REVERSE CHARGE: YES</b>', ParagraphStyle(
+        'TaxLine', parent=styles['Normal'], fontSize=10, fontName='Helvetica-Bold', alignment=1))
+    elements.append(tax_line)
     elements.append(Spacer(1, 12))
     
-    # Customer and invoice info
-    info_data = [
-        ['Customer:', invoice['customer_name'], 'Invoice Date:', invoice['invoice_date'].strftime('%Y-%m-%d') if isinstance(invoice['invoice_date'], datetime.date) else str(invoice['invoice_date'])],
-        ['Booking:', invoice['booking_number'], 'Due Date:', invoice['due_date'].strftime('%Y-%m-%d') if isinstance(invoice['due_date'], datetime.date) else str(invoice['due_date'])],
-        ['Pickup:', invoice['pickup_location'], 'Delivery:', invoice['delivery_location']],
-        ['Movement:', invoice['movement_type'], 'Distance:', f"{invoice.get('distance_km', 0)} KM"],
-        ['Vehicle:', invoice.get('vehicle_number', 'N/A'), 'Driver:', invoice.get('driver_name', 'N/A')]
+    # Invoice details and customer info section
+    # Get booking details for additional info
+    booking = next((b for b in st.session_state.bookings if b['booking_number'] == invoice['booking_number']), None)
+    customer = next((c for c in st.session_state.customers if c['name'] == invoice['customer_name']), None)
+    
+    invoice_info_data = [
+        [
+            # Left column - Invoice To and Shipped To
+            Paragraph(f"""<b>INVOICE TO:</b><br/>
+            {invoice['customer_name']}<br/>
+            {customer.get('address', 'N/A') if customer else 'N/A'}""", section_style),
+            # Right column - Invoice details
+            Paragraph(f"""<b>INVOICE NO:</b>&nbsp;&nbsp;&nbsp;&nbsp;{invoice['invoice_number']}<br/>
+            <b>INVOICE DATE:</b>&nbsp;&nbsp;&nbsp;&nbsp;{invoice['invoice_date'].strftime('%d/%m/%Y') if isinstance(invoice['invoice_date'], datetime.date) else str(invoice['invoice_date'])}<br/>
+            <b>DUE DATE:</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{invoice['due_date'].strftime('%d/%m/%Y') if isinstance(invoice['due_date'], datetime.date) else str(invoice['due_date'])}<br/>
+            <b>PICKUP DATE:</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{booking.get('pickup_date', 'N/A') if booking else 'N/A'}<br/>
+            <b>DELIVERY DATE:</b>&nbsp;&nbsp;{booking.get('delivery_date', 'N/A') if booking else 'N/A'}""", section_style)
+        ]
     ]
     
-    # Add contract details if applicable
-    if invoice['invoice_type'] == "Contract Invoice":
-        info_data.append(['Contract Period:', f"{invoice['contract_start_date']} to {invoice['contract_end_date']}", 'DSR Number:', invoice.get('dsr_number', 'N/A')])
+    # Add shipped to info
+    shipped_to_data = [
+        [
+            Paragraph(f"""<b>SHIPPED TO:</b><br/>
+            {invoice['delivery_location']}<br/>
+            Contact: {booking.get('delivery_contact', 'N/A') if booking else 'N/A'}""", section_style),
+            Paragraph(f"""<b>PICK FROM:</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{invoice['pickup_location']}<br/>
+            <b>DELIVERED TO:</b>&nbsp;&nbsp;&nbsp;{invoice['delivery_location']}<br/>
+            <b>PACKAGE DETAILS:</b>&nbsp;{booking.get('material_type', 'GENERAL CARGO') if booking else 'GENERAL CARGO'}<br/>
+            <b>REFERENCE NO:</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{invoice['booking_number']}""", section_style)
+        ]
+    ]
     
-    info_table = Table(info_data, colWidths=[1.5*inch, 2.5*inch, 1.5*inch, 2*inch])
+    info_table = Table(invoice_info_data + shipped_to_data, colWidths=[3.5*inch, 3.5*inch])
     info_table.setStyle(TableStyle([
         ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-        ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+    ]))
+    
+    elements.append(info_table)
+    elements.append(Spacer(1, 12))
+    
+    # Description section
+    desc_text = f"Booking Ref: {invoice['booking_number']}, Vehicle: {invoice.get('vehicle_number', 'N/A')}, Movement: {invoice['movement_type']}"
+    if booking and booking.get('description'):
+        desc_text += f", {booking['description']}"
+    
+    description = Paragraph(f"<b>DESCRIPTION:</b><br/>{desc_text}", section_style)
+    elements.append(description)
+    elements.append(Spacer(1, 15))
+    
+    # Charges table in S TRANZ format
+    charges_data = [
+        ['CHARGES', 'QTY', 'RATE', 'AMOUNT']
+    ]
+    
+    # Transportation charges section
+    charges_data.append(['TRANSPORTATION CHARGES:', '', '', ''])
+    
+    # Base transportation charge
+    charges_data.append(['- Closed Truck (Base)', '1', f"{safe_float(invoice.get('base_amount')):.2f}", f"{safe_float(invoice.get('base_amount')):.2f}"])
+    
+    # Add booking charges if they exist
+    if invoice.get('booking_fuel_charges', 0) > 0:
+        charges_data.append(['- Fuel Charges', '1', f"{safe_float(invoice.get('booking_fuel_charges')):.2f}", f"{safe_float(invoice.get('booking_fuel_charges')):.2f}"])
+    
+    if invoice.get('booking_toll_charges', 0) > 0:
+        charges_data.append(['- Toll Charges', '1', f"{safe_float(invoice.get('booking_toll_charges')):.2f}", f"{safe_float(invoice.get('booking_toll_charges')):.2f}"])
+    
+    # Add additional fuel and toll if any
+    if invoice.get('additional_fuel', 0) > 0:
+        charges_data.append(['- Additional Fuel', '1', f"{safe_float(invoice.get('additional_fuel')):.2f}", f"{safe_float(invoice.get('additional_fuel')):.2f}"])
+    
+    if invoice.get('additional_toll', 0) > 0:
+        charges_data.append(['- Additional Toll', '1', f"{safe_float(invoice.get('additional_toll')):.2f}", f"{safe_float(invoice.get('additional_toll')):.2f}"])
+    
+    # Calculate transportation subtotal
+    transportation_total = (safe_float(invoice.get('base_amount')) + 
+                          safe_float(invoice.get('booking_fuel_charges')) + 
+                          safe_float(invoice.get('booking_toll_charges')) +
+                          safe_float(invoice.get('additional_fuel')) + 
+                          safe_float(invoice.get('additional_toll')))
+    charges_data.append(['', 'Transportation Subtotal:', '', f"{transportation_total:.2f}"])
+    
+    # Other charges section
+    other_charges_total = 0
+    other_charges_exist = False
+    
+    # Check if we have any other charges
+    booking_other_total = (safe_float(invoice.get('booking_loading_charges')) + 
+                          safe_float(invoice.get('booking_unloading_charges')) +
+                          safe_float(invoice.get('booking_airport_pass_charges')) +
+                          safe_float(invoice.get('booking_halting_charges')) +
+                          safe_float(invoice.get('booking_other_charges')))
+    
+    additional_other_total = (safe_float(invoice.get('additional_loading')) + 
+                             safe_float(invoice.get('additional_detention')) +
+                             safe_float(invoice.get('additional_misc')))
+    
+    if booking_other_total > 0 or additional_other_total > 0:
+        charges_data.append(['OTHER CHARGES:', '', '', ''])
+        other_charges_exist = True
+        
+        # Add booking charges
+        if invoice.get('booking_loading_charges', 0) > 0:
+            charges_data.append(['- Loading/Unloading Charges', '1', f"{safe_float(invoice.get('booking_loading_charges')):.2f}", f"{safe_float(invoice.get('booking_loading_charges')):.2f}"])
+            other_charges_total += safe_float(invoice.get('booking_loading_charges'))
+        
+        if invoice.get('booking_unloading_charges', 0) > 0:
+            charges_data.append(['- Unloading Charges', '1', f"{safe_float(invoice.get('booking_unloading_charges')):.2f}", f"{safe_float(invoice.get('booking_unloading_charges')):.2f}"])
+            other_charges_total += safe_float(invoice.get('booking_unloading_charges'))
+        
+        if invoice.get('booking_airport_pass_charges', 0) > 0:
+            charges_data.append(['- Airport Pass Charges', '1', f"{safe_float(invoice.get('booking_airport_pass_charges')):.2f}", f"{safe_float(invoice.get('booking_airport_pass_charges')):.2f}"])
+            other_charges_total += safe_float(invoice.get('booking_airport_pass_charges'))
+        
+        if invoice.get('booking_halting_charges', 0) > 0:
+            charges_data.append(['- Halting Charges', '1', f"{safe_float(invoice.get('booking_halting_charges')):.2f}", f"{safe_float(invoice.get('booking_halting_charges')):.2f}"])
+            other_charges_total += safe_float(invoice.get('booking_halting_charges'))
+        
+        if invoice.get('booking_other_charges', 0) > 0:
+            charges_data.append(['- Other Charges', '1', f"{safe_float(invoice.get('booking_other_charges')):.2f}", f"{safe_float(invoice.get('booking_other_charges')):.2f}"])
+            other_charges_total += safe_float(invoice.get('booking_other_charges'))
+        
+        # Add additional charges
+        if invoice.get('additional_loading', 0) > 0:
+            charges_data.append(['- Additional Loading', '1', f"{safe_float(invoice.get('additional_loading')):.2f}", f"{safe_float(invoice.get('additional_loading')):.2f}"])
+            other_charges_total += safe_float(invoice.get('additional_loading'))
+        
+        if invoice.get('additional_detention', 0) > 0:
+            charges_data.append(['- Detention Charges', '1', f"{safe_float(invoice.get('additional_detention')):.2f}", f"{safe_float(invoice.get('additional_detention')):.2f}"])
+            other_charges_total += safe_float(invoice.get('additional_detention'))
+        
+        if invoice.get('additional_misc', 0) > 0:
+            charges_data.append(['- Miscellaneous Charges', '1', f"{safe_float(invoice.get('additional_misc')):.2f}", f"{safe_float(invoice.get('additional_misc')):.2f}"])
+            other_charges_total += safe_float(invoice.get('additional_misc'))
+        
+        charges_data.append(['', 'Other Charges Subtotal:', '', f"{other_charges_total:.2f}"])
+    
+    charges_table = Table(charges_data, colWidths=[3*inch, 0.8*inch, 1.2*inch, 1.2*inch])
+    charges_table.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+        ('ALIGN', (2, 0), (-1, -1), 'RIGHT'),
+        ('ALIGN', (3, 0), (-1, -1), 'RIGHT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+        ('FONTNAME', (0, 1), (0, 1), 'Helvetica-Bold'),  # Transportation charges header
+    ]))
+    
+    # Add styling for other charges header if it exists
+    if other_charges_exist:
+        # Find the "OTHER CHARGES:" row and make it bold
+        for i, row in enumerate(charges_data):
+            if row[0] == 'OTHER CHARGES:':
+                charges_table.setStyle(TableStyle([
+                    ('FONTNAME', (0, i), (0, i), 'Helvetica-Bold')
+                ]))
+                break
+    
+    elements.append(charges_table)
+    elements.append(Spacer(1, 15))
+    
+    # Amount summary section
+    amount_words = convert_amount_to_words(invoice['total_amount'])
+    
+    summary_data = [
+        ['AMOUNT IN WORDS:', 'SUBTOTAL:', f"{invoice['subtotal']:.2f}"],
+        [Paragraph(amount_words, ParagraphStyle('AmountWords', parent=styles['Normal'], fontSize=8, fontName='Helvetica')), 'ADVANCE PAID:', f"{invoice.get('advance_paid', 0):.2f}"],
+        ['', 'BALANCE DUE:', f"{invoice.get('outstanding_amount', invoice['total_amount']):.2f}"]
+    ]
+    
+    summary_table = Table(summary_data, colWidths=[3.5*inch, 1.5*inch, 1.2*inch], rowHeights=[None, 25, None])
+    summary_table.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+        ('ALIGN', (0, 1), (0, 1), 'LEFT'),
+        ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+        ('FONTNAME', (0, 0), (0, 0), 'Helvetica-Bold'),
+        ('FONTNAME', (1, 0), (-1, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
         ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
     ]))
     
-    elements.append(info_table)
+    elements.append(summary_table)
     elements.append(Spacer(1, 20))
     
-    # Charges table
-    charges_data = [['Description', 'Amount (₹)']]
-    charges_data.append(['Base Amount', f"{invoice['base_amount']:,.2f}"])
+    # Bank details section
+    bank_details = Paragraph("""
+    <b>BANK DETAILS:</b><br/>
+    Bank: &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;KARUR VYSYA BANK<br/>
+    A/C Name: &nbsp;&nbsp;&nbsp;S TRANZ<br/>
+    A/C No: &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;1650115000002749<br/>
+    IFSC Code: &nbsp;&nbsp;KVBL0001650<br/>
+    Branch: &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Pallavaram Branch
+    """, ParagraphStyle('BankDetails', parent=styles['Normal'], fontSize=9, fontName='Helvetica'))
     
-    if invoice.get('additional_fuel', 0) > 0:
-        charges_data.append(['Additional Fuel Charges', f"{invoice['additional_fuel']:,.2f}"])
-    if invoice.get('additional_toll', 0) > 0:
-        charges_data.append(['Additional Toll Charges', f"{invoice['additional_toll']:,.2f}"])
-    if invoice.get('additional_loading', 0) > 0:
-        charges_data.append(['Additional Loading Charges', f"{invoice['additional_loading']:,.2f}"])
-    if invoice.get('additional_detention', 0) > 0:
-        charges_data.append(['Detention Charges', f"{invoice['additional_detention']:,.2f}"])
-    if invoice.get('additional_misc', 0) > 0:
-        charges_data.append(['Miscellaneous Charges', f"{invoice['additional_misc']:,.2f}"])
-    if invoice.get('discount', 0) > 0:
-        charges_data.append(['Discount', f"-{invoice['discount']:,.2f}"])
+    # Signature section
+    signature_data = [
+        [bank_details, 'For S Tranz']
+    ]
     
-    charges_data.append(['Subtotal', f"{invoice['subtotal']:,.2f}"])
-    
-    if invoice.get('gst_applicable', False):
-        charges_data.append([f"GST ({invoice.get('gst_rate', 18)}%)", f"{invoice.get('gst_amount', 0):,.2f}"])
-    
-    charges_data.append(['Total Amount', f"{invoice['total_amount']:,.2f}"])
-    
-    charges_table = Table(charges_data, colWidths=[4*inch, 2*inch])
-    charges_table.setStyle(TableStyle([
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTNAME', (0, -2), (-1, -1), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 10),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-        ('BACKGROUND', (0, -1), (-1, -1), colors.lightgrey),
+    signature_table = Table(signature_data, colWidths=[4*inch, 2.5*inch])
+    signature_table.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+        ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('FONTSIZE', (1, 0), (1, 0), 10),
+        ('FONTNAME', (1, 0), (1, 0), 'Helvetica-Bold'),
     ]))
     
-    elements.append(charges_table)
-    elements.append(Spacer(1, 20))
+    elements.append(signature_table)
+    elements.append(Spacer(1, 25))
     
-    # Notes
-    if invoice.get('invoice_notes'):
-        notes_title = Paragraph("<b>Notes:</b>", styles['Normal'])
-        elements.append(notes_title)
-        notes = Paragraph(invoice['invoice_notes'], styles['Normal'])
-        elements.append(notes)
-        elements.append(Spacer(1, 20))
+    # Footer
+    footer = Paragraph("""
+    <para align="center">
+    THANKS FOR BEING A VALUED CLIENT. LOOKING FORWARD TO THE NEXT OPPORTUNITY<br/>
+    <i>(This invoice has been generated by our accounting system and is valid without a physical signature)</i>
+    </para>
+    """, ParagraphStyle('Footer', parent=styles['Normal'], fontSize=8, alignment=1))
     
-    # Payment details
-    payment_info = Paragraph(f"""
-    <b>Payment Information:</b><br/>
-    Total Amount: ₹{invoice['total_amount']:,.2f}<br/>
-    Outstanding: ₹{invoice.get('outstanding_amount', invoice['total_amount']):,.2f}<br/>
-    Payment Terms: {invoice.get('payment_terms', 30)} days<br/>
-    Status: {invoice.get('status', 'Generated')}
-    """, styles['Normal'])
-    elements.append(payment_info)
-    elements.append(Spacer(1, 20))
-    
-    # Terms and conditions
-    terms = Paragraph("""
-    <b>Terms and Conditions:</b><br/>
-    1. Payment should be made within the specified payment terms.<br/>
-    2. All disputes should be reported within 7 days of invoice date.<br/>
-    3. Interest will be charged on overdue amounts as per company policy.<br/>
-    4. Goods once dispatched will not be taken back.<br/>
-    5. This is a computer generated invoice and does not require signature.<br/>
-    """, styles['Normal'])
-    elements.append(terms)
+    elements.append(footer)
     
     # Build PDF
     doc.build(elements)
@@ -751,3 +1279,82 @@ def generate_invoice_pdf(invoice):
     buffer.close()
     
     return pdf_data
+
+def convert_amount_to_words(amount):
+    """Convert numerical amount to words in Indian format"""
+    try:
+        amount = float(amount)
+        
+        # Handle special cases
+        if amount == 0:
+            return "Zero Rupees Only"
+        
+        # For amounts up to 99,999 - basic conversion
+        def convert_hundreds(num):
+            ones = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine",
+                   "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", 
+                   "Seventeen", "Eighteen", "Nineteen"]
+            tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"]
+            
+            result = ""
+            
+            # Hundreds
+            if num >= 100:
+                result += ones[num // 100] + " Hundred "
+                num %= 100
+            
+            # Tens and ones
+            if num >= 20:
+                result += tens[num // 10]
+                if num % 10 > 0:
+                    result += " " + ones[num % 10]
+            elif num > 0:
+                result += ones[num]
+            
+            return result.strip()
+        
+        # Handle amounts in Indian numbering system
+        amount_int = int(amount)
+        
+        if amount_int < 1000:
+            words = convert_hundreds(amount_int)
+        elif amount_int < 100000:  # Up to 99,999
+            thousands = amount_int // 1000
+            remainder = amount_int % 1000
+            
+            words = convert_hundreds(thousands) + " Thousand"
+            if remainder > 0:
+                words += " " + convert_hundreds(remainder)
+        elif amount_int < 10000000:  # Up to 99,99,999 (99 Lakhs)
+            lakhs = amount_int // 100000
+            remainder = amount_int % 100000
+            
+            words = convert_hundreds(lakhs) + " Lakh"
+            if remainder > 0:
+                if remainder >= 1000:
+                    thousands = remainder // 1000
+                    remainder = remainder % 1000
+                    words += " " + convert_hundreds(thousands) + " Thousand"
+                if remainder > 0:
+                    words += " " + convert_hundreds(remainder)
+        else:
+            # For very large amounts, use a simpler format
+            words = f"Rupees {amount:,.2f}"
+        
+        # Add "Rupees" and "Only" to complete the format
+        if not words.startswith("Rupees"):
+            words = words + " Rupees"
+        
+        # Handle decimals (paise)
+        decimal_part = amount - amount_int
+        if decimal_part > 0:
+            paise = int(round(decimal_part * 100))
+            if paise > 0:
+                words += f" and {convert_hundreds(paise)} Paise"
+        
+        words += " Only"
+        
+        return words
+        
+    except Exception as e:
+        return f"Amount: ₹{amount:,.2f}"

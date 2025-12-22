@@ -3,6 +3,52 @@ import pandas as pd
 import datetime
 import uuid
 from typing import Dict, List
+from decimal import Decimal
+
+def safe_decimal_subtract(original_value, subtract_value):
+    """Safely subtract values handling Decimal/float conversion"""
+    try:
+        original_decimal = Decimal(str(original_value))
+        subtract_decimal = Decimal(str(subtract_value))
+        return float(original_decimal - subtract_decimal)
+    except (ValueError, TypeError):
+        # Fallback to regular subtraction
+        return float(original_value) - float(subtract_value)
+
+def safe_float(value):
+    """Safely convert value to float handling Decimal objects"""
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return 0.0
+
+def can_delete_customer(customer):
+    """Check if customer can be safely deleted"""
+    customer_id = customer['id']
+    
+    # Check for existing bookings (prioritize customer_id)
+    customer_bookings = [b for b in st.session_state.bookings if b.get('customer_id') == customer_id]
+    
+    # Check for existing invoices (prioritize customer_id)
+    customer_invoices = [i for i in st.session_state.invoices if i.get('customer_id') == customer_id]
+    
+    # Check for existing payments (prioritize customer_id)
+    customer_payments = [p for p in st.session_state.customer_payments if p.get('customer_id') == customer_id]
+    
+    # Check for existing quotations (prioritize customer_id)
+    customer_quotations = [q for q in st.session_state.quotations if q.get('customer_id') == customer_id]
+    
+    blocking_records = []
+    if customer_bookings:
+        blocking_records.append(f"{len(customer_bookings)} booking(s)")
+    if customer_invoices:
+        blocking_records.append(f"{len(customer_invoices)} invoice(s)")
+    if customer_payments:
+        blocking_records.append(f"{len(customer_payments)} payment(s)")
+    if customer_quotations:
+        blocking_records.append(f"{len(customer_quotations)} quotation(s)")
+    
+    return len(blocking_records) == 0, blocking_records
 
 def show():
     """Display the customer payments module"""
@@ -14,7 +60,7 @@ def show():
     
     st.header("💰 Customer Payments Management")
     
-    tab1, tab2, tab3, tab4 = st.tabs(["Record Payment", "View Payments", "Customer Statements", "Outstanding Reports"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Record Payment", "View Payments", "Customer Statements", "Outstanding Reports", "Manage Customers", "Unallocated Balances"])
     
     with tab1:
         record_payment()
@@ -27,6 +73,12 @@ def show():
     
     with tab4:
         outstanding_reports()
+    
+    with tab5:
+        manage_customers()
+    
+    with tab6:
+        manage_unallocated_balances()
 
 def record_payment():
     """Record a new customer payment"""
@@ -115,6 +167,7 @@ def record_invoice_payment(invoice):
             'bank_name': bank_name,
             'remarks': remarks,
             'allocation_status': 'Allocated',
+            'payment_status': 'Completed',
             'allocated_invoices': [invoice['invoice_number']],
             'created_date': datetime.datetime.now(),
             'created_by': 'Admin'
@@ -128,8 +181,11 @@ def record_invoice_payment(invoice):
                 st.session_state.customer_payments = []
             st.session_state.customer_payments.append(payment)
             
-            # Update invoice outstanding
-            invoice['outstanding_amount'] -= payment_amount
+            # Update invoice outstanding amount (ensure both are same type)
+            from decimal import Decimal
+            current_outstanding = Decimal(str(invoice['outstanding_amount']))
+            payment_decimal = Decimal(str(payment_amount))
+            invoice['outstanding_amount'] = float(current_outstanding - payment_decimal)
             
             # Update invoice status
             if invoice['outstanding_amount'] <= 0:
@@ -160,7 +216,7 @@ def record_manual_payment():
     # Customer selection
     customers_with_outstanding = []
     for customer in st.session_state.customers:
-        outstanding = sum(inv['outstanding_amount'] for inv in st.session_state.invoices if inv['customer_id'] == customer['id'])
+        outstanding = sum(float(inv['outstanding_amount']) for inv in st.session_state.invoices if inv['customer_id'] == customer['id'])
         if outstanding > 0:
             customers_with_outstanding.append(customer)
     
@@ -168,7 +224,7 @@ def record_manual_payment():
         st.info("No customers with outstanding invoices found.")
         return
     
-    customer_options = [f"{c['name']} - Outstanding: ₹{sum(inv['outstanding_amount'] for inv in st.session_state.invoices if inv['customer_id'] == c['id']):,.2f}" 
+    customer_options = [f"{c['name']} - Outstanding: ₹{sum(float(inv['outstanding_amount']) for inv in st.session_state.invoices if inv['customer_id'] == c['id']):,.2f}" 
                        for c in customers_with_outstanding]
     
     selected_customer_option = st.selectbox("Select Customer*", customer_options, key="manual_customer_select")
@@ -208,7 +264,17 @@ def record_manual_payment():
     
     with col1:
         payment_date = st.date_input("Payment Date*", value=datetime.datetime.now().date(), key="manual_payment_date")
-        payment_amount = st.number_input("Payment Amount (₹)*", min_value=0.0, value=0.0, key="manual_payment_amount")
+        
+        # Calculate total outstanding for default amount
+        total_outstanding_for_customer = sum(float(inv['outstanding_amount']) for inv in customer_invoices)
+        
+        payment_amount = st.number_input(
+            "Payment Amount (₹)*", 
+            min_value=0.0, 
+            value=float(total_outstanding_for_customer), 
+            key="manual_payment_amount",
+            help="Default is total outstanding amount"
+        )
     
     with col2:
         payment_method = st.selectbox(
@@ -260,9 +326,14 @@ def record_manual_payment():
                     total_allocated += allocate_amount
         
         st.write(f"**Total Allocated:** ₹{total_allocated:,.2f}")
+        st.write(f"**Payment Amount:** ₹{payment_amount:,.2f}")
         
-        if total_allocated > payment_amount:
-            st.error("Total allocated amount cannot exceed payment amount")
+        # Convert to float for proper comparison
+        total_allocated_float = float(total_allocated)
+        payment_amount_float = float(payment_amount)
+        
+        if total_allocated_float > payment_amount_float:
+            st.error(f"Total allocated (₹{total_allocated_float:,.2f}) cannot exceed payment amount (₹{payment_amount_float:,.2f})")
             return
     
     # Submit payment
@@ -271,9 +342,13 @@ def record_manual_payment():
             st.error("Payment date and amount are required")
             return
         
-        if allocation_type == "Allocate to specific invoices" and total_allocated != payment_amount:
-            st.error("Total allocated amount must equal payment amount")
-            return
+        if allocation_type == "Allocate to specific invoices":
+            total_allocated_float = float(total_allocated)
+            payment_amount_float = float(payment_amount)
+            
+            if abs(total_allocated_float - payment_amount_float) > 0.01:  # Allow small rounding differences
+                st.error(f"Total allocated amount (₹{total_allocated_float:,.2f}) must equal payment amount (₹{payment_amount_float:,.2f})")
+                return
         
         # Create payment record
         payment = {
@@ -287,6 +362,7 @@ def record_manual_payment():
             'bank_name': bank_name,
             'remarks': remarks,
             'allocation_status': 'Allocated' if allocation_type == "Allocate to specific invoices" else 'Unallocated',
+            'payment_status': 'Completed',
             'allocated_invoices': allocated_invoices if allocation_type == "Allocate to specific invoices" else [],
             'created_date': datetime.datetime.now(),
             'created_by': 'Admin'
@@ -305,7 +381,11 @@ def record_manual_payment():
                 for inv in customer_invoices:
                     allocate_amount = st.session_state.get(f"allocate_{inv['id']}", 0.0)
                 if allocate_amount > 0:
-                    inv['outstanding_amount'] -= allocate_amount
+                    # Update invoice outstanding amount (ensure both are same type)
+                    from decimal import Decimal
+                    current_outstanding = Decimal(str(inv['outstanding_amount']))
+                    allocation_decimal = Decimal(str(allocate_amount))
+                    inv['outstanding_amount'] = float(current_outstanding - allocation_decimal)
                     
                     # Update invoice status
                     if inv['outstanding_amount'] <= 0:
@@ -333,7 +413,7 @@ def view_payments():
         return
     
     # Filters
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         customer_filter = st.selectbox(
@@ -350,6 +430,13 @@ def view_payments():
         )
     
     with col3:
+        payment_status_filter = st.selectbox(
+            "Payment Status",
+            ["All", "Completed", "Pending"],
+            key="payment_status_filter"
+        )
+    
+    with col4:
         date_filter = st.date_input(
             "From Date",
             value=datetime.datetime.now() - datetime.timedelta(days=30),
@@ -365,28 +452,36 @@ def view_payments():
     if allocation_filter != "All":
         filtered_payments = [p for p in filtered_payments if p['allocation_status'] == allocation_filter]
     
+    if payment_status_filter != "All":
+        filtered_payments = [p for p in filtered_payments if p.get('payment_status', 'Completed') == payment_status_filter]
+    
     filtered_payments = [p for p in filtered_payments if p['payment_date'] >= date_filter]
     
     # Summary
     total_payments = len(filtered_payments)
     total_amount = sum(p['payment_amount'] for p in filtered_payments)
     allocated_payments = len([p for p in filtered_payments if p['allocation_status'] == 'Allocated'])
+    completed_payments = len([p for p in filtered_payments if p.get('payment_status', 'Completed') == 'Completed'])
     
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Total Payments", total_payments)
     with col2:
         st.metric("Total Amount", f"₹{total_amount:,.2f}")
     with col3:
         st.metric("Allocated Payments", f"{allocated_payments}/{total_payments}")
+    with col4:
+        st.metric("Completed Payments", f"{completed_payments}/{total_payments}")
     
     st.markdown("---")
     
     # Display payments
     for payment in filtered_payments:
         allocation_icon = "✅" if payment['allocation_status'] == 'Allocated' else "⏳"
+        payment_status = payment.get('payment_status', 'Completed')
+        status_icon = "💚" if payment_status == 'Completed' else "⏳"
         
-        with st.expander(f"{allocation_icon} {payment['customer_name']} - ₹{payment['payment_amount']:,.2f} - {payment['payment_date']}"):
+        with st.expander(f"{allocation_icon} {status_icon} {payment['customer_name']} - ₹{payment['payment_amount']:,.2f} - {payment['payment_date']}"):
             col1, col2 = st.columns(2)
             
             with col1:
@@ -399,6 +494,7 @@ def view_payments():
             
             with col2:
                 st.write(f"**Allocation Status:** {payment['allocation_status']}")
+                st.write(f"**Payment Status:** {payment.get('payment_status', 'Completed')}")
                 if payment['allocated_invoices']:
                     st.write(f"**Allocated to:** {', '.join(payment['allocated_invoices'])}")
                 if payment.get('bank_name'):
@@ -408,8 +504,15 @@ def view_payments():
             
             # Update allocation for unallocated payments
             if payment['allocation_status'] == 'Unallocated':
-                if st.button(f"Update Allocation", key=f"update_{payment['id']}"):
-                    update_payment_allocation(payment)
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button(f"Update Allocation", key=f"update_{payment['id']}"):
+                        update_payment_allocation(payment)
+                with col2:
+                    if st.button(f"Mark as Completed (Unallocated)", key=f"complete_{payment['id']}"):
+                        payment['payment_status'] = 'Completed'
+                        st.success("Payment marked as completed!")
+                        st.rerun()
 
 def update_payment_allocation(payment):
     """Update allocation for unallocated payment"""
@@ -458,13 +561,18 @@ def update_payment_allocation(payment):
         
         # Update payment allocation
         payment['allocation_status'] = 'Allocated'
+        payment['payment_status'] = 'Completed'
         payment['allocated_invoices'] = allocated_invoices
         
         # Update invoice outstanding
         for inv in customer_invoices:
             allocate_amount = st.session_state.get(f"update_allocate_{inv['id']}", 0.0)
             if allocate_amount > 0:
-                inv['outstanding_amount'] -= allocate_amount
+                # Update invoice outstanding amount (ensure both are same type)
+                from decimal import Decimal
+                current_outstanding = Decimal(str(inv['outstanding_amount']))
+                allocation_decimal = Decimal(str(allocate_amount))
+                inv['outstanding_amount'] = float(current_outstanding - allocation_decimal)
                 
                 if inv['outstanding_amount'] <= 0:
                     inv['status'] = 'Paid'
@@ -546,7 +654,7 @@ def generate_monthly_statement(customer_name, month, year):
         total_invoices = len(period_invoices)
         total_invoiced = sum(inv['total_amount'] for inv in period_invoices)
         total_payments = sum(p['payment_amount'] for p in period_payments)
-        total_outstanding = sum(inv['outstanding_amount'] for inv in all_customer_invoices)
+        total_outstanding = sum(float(inv['outstanding_amount']) for inv in all_customer_invoices)
         
         st.markdown("**Period Summary:**")
         st.write(f"Invoices Generated: {total_invoices}")
@@ -587,7 +695,7 @@ def generate_monthly_statement(customer_name, month, year):
                 'Date': inv['invoice_date'],
                 'Due Date': inv['due_date'],
                 'Amount': f"₹{inv['total_amount']:,.2f}",
-                'Paid': f"₹{inv['total_amount'] - inv['outstanding_amount']:,.2f}",
+                'Paid': f"₹{safe_float(inv['total_amount']) - safe_float(inv['outstanding_amount']):,.2f}",
                 'Outstanding': f"₹{inv['outstanding_amount']:,.2f}",
                 'Days Overdue': days_overdue,
                 'Status': status_color
@@ -607,6 +715,7 @@ def generate_monthly_statement(customer_name, month, year):
                 'Method': payment['payment_method'],
                 'Reference': payment.get('reference_number', ''),
                 'Allocation': payment['allocation_status'],
+                'Status': payment.get('payment_status', 'Completed'),
                 'Allocated To': ', '.join(payment['allocated_invoices']) if payment['allocated_invoices'] else 'N/A'
             })
         
@@ -624,17 +733,18 @@ def generate_monthly_statement(customer_name, month, year):
             days_overdue = max(0, (datetime.datetime.now().date() - inv['due_date']).days)
             
             # Aging bucket
+            outstanding_float = safe_float(inv['outstanding_amount'])
             if days_overdue <= 30:
-                aging_buckets['0-30'] += inv['outstanding_amount']
+                aging_buckets['0-30'] += outstanding_float
                 bucket = '0-30 days'
             elif days_overdue <= 60:
-                aging_buckets['31-60'] += inv['outstanding_amount']
+                aging_buckets['31-60'] += outstanding_float
                 bucket = '31-60 days'
             elif days_overdue <= 90:
-                aging_buckets['61-90'] += inv['outstanding_amount']
+                aging_buckets['61-90'] += outstanding_float
                 bucket = '61-90 days'
             else:
-                aging_buckets['90+'] += inv['outstanding_amount']
+                aging_buckets['90+'] += outstanding_float
                 bucket = '90+ days'
             
             outstanding_data.append({
@@ -673,8 +783,8 @@ def outstanding_reports():
     for customer in st.session_state.customers:
         customer_invoices = [inv for inv in st.session_state.invoices if inv['customer_id'] == customer['id']]
         
-        total_invoiced = sum(inv['total_amount'] for inv in customer_invoices)
-        total_outstanding = sum(inv['outstanding_amount'] for inv in customer_invoices)
+        total_invoiced = sum(float(inv['total_amount']) for inv in customer_invoices)
+        total_outstanding = sum(safe_float(inv['outstanding_amount']) for inv in customer_invoices)
         
         if total_outstanding > 0:
             # Calculate aging
@@ -682,20 +792,21 @@ def outstanding_reports():
             overdue_invoices = 0
             
             for inv in customer_invoices:
-                if inv['outstanding_amount'] > 0:
+                outstanding_amt = safe_float(inv['outstanding_amount'])
+                if outstanding_amt > 0:
                     days_overdue = max(0, (datetime.datetime.now().date() - inv['due_date']).days)
                     
                     if days_overdue > 0:
                         overdue_invoices += 1
                     
                     if days_overdue <= 30:
-                        aging_buckets['0-30'] += inv['outstanding_amount']
+                        aging_buckets['0-30'] += outstanding_amt
                     elif days_overdue <= 60:
-                        aging_buckets['31-60'] += inv['outstanding_amount']
+                        aging_buckets['31-60'] += outstanding_amt
                     elif days_overdue <= 90:
-                        aging_buckets['61-90'] += inv['outstanding_amount']
+                        aging_buckets['61-90'] += outstanding_amt
                     else:
-                        aging_buckets['90+'] += inv['outstanding_amount']
+                        aging_buckets['90+'] += outstanding_amt
             
             customer_outstanding.append({
                 'Customer Name': customer['name'],
@@ -724,3 +835,401 @@ def outstanding_reports():
             )
     else:
         st.info("No outstanding amounts found.")
+
+def manage_customers():
+    """Manage customer records - view, edit, delete"""
+    st.subheader("Manage Customers")
+    
+    if not st.session_state.customers:
+        st.info("No customers found. Customers are created when bookings or quotations are made.")
+        return
+    
+    # Get unique customers (avoid duplicates by ID, not name)
+    unique_customers = {}
+    for customer in st.session_state.customers:
+        customer_id = customer['id']
+        if customer_id not in unique_customers:
+            unique_customers[customer_id] = customer
+    
+    st.info(f"Showing {len(unique_customers)} customers")
+    
+    # Search/filter
+    search_term = st.text_input("🔍 Search customers by name, email, or phone", key="customer_search")
+    
+    # Filter customers
+    filtered_customers = []
+    for customer in unique_customers.values():
+        if not search_term or \
+           search_term.lower() in customer['name'].lower() or \
+           search_term.lower() in customer.get('email', '').lower() or \
+           search_term.lower() in customer.get('phone', '').lower():
+            filtered_customers.append(customer)
+    
+    # Display customers
+    for customer in filtered_customers:
+        # Calculate customer stats
+        customer_bookings = [b for b in st.session_state.bookings if b.get('customer_id') == customer['id']]
+        customer_invoices = [i for i in st.session_state.invoices if i.get('customer_id') == customer['id']]
+        total_business = sum(booking.get('total_amount', 0) for booking in customer_bookings)
+        outstanding = sum(float(invoice.get('outstanding_amount', 0)) for invoice in customer_invoices)
+        
+        # Create unique display name with phone for customers with same names
+        customer_display = customer['name']
+        phone_suffix = f" ({customer.get('phone', 'No phone')})"
+        # Check if there are other customers with the same name
+        same_name_customers = [c for c in filtered_customers if c['name'] == customer['name']]
+        if len(same_name_customers) > 1:
+            customer_display = customer['name'] + phone_suffix
+        
+        with st.expander(f"👤 {customer_display} - {len(customer_bookings)} bookings - ₹{total_business:,.2f} total - ID: {customer['id'][:8]}..."):
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.markdown("**Contact Information**")
+                st.write(f"**Name:** {customer['name']}")
+                st.write(f"**Phone:** {customer.get('phone', 'Not provided')}")
+                st.write(f"**Email:** {customer.get('email', 'Not provided')}")
+                st.write(f"**Address:** {customer.get('address', 'Not provided')}")
+            
+            with col2:
+                st.markdown("**Business Summary**")
+                st.write(f"**Total Bookings:** {len(customer_bookings)}")
+                st.write(f"**Total Business:** ₹{total_business:,.2f}")
+                st.write(f"**Outstanding:** ₹{outstanding:,.2f}")
+                st.write(f"**Payment Terms:** {customer.get('payment_terms', 30)} days")
+                st.write(f"**Created:** {customer.get('created_date', 'Unknown')}")
+            
+            with col3:
+                st.markdown("**Actions**")
+                
+                # Only allow editing if user is creator (for now, allow all admin users)
+                user_role = st.session_state.get('user_role', 'Guest')
+                can_edit = user_role in ['Administrator', 'Manager']
+                
+                if can_edit:
+                    edit_col, remove_col = st.columns(2)
+                    
+                    with edit_col:
+                        if st.button(f"✏️ Edit", key=f"edit_customer_{customer['id']}"):
+                            st.session_state[f"editing_customer_{customer['id']}"] = True
+                            st.rerun()
+                    
+                    with remove_col:
+                        # Check if customer can be deleted
+                        can_del, blocking_records = can_delete_customer(customer)
+                        
+                        if can_del:
+                            if st.button(f"🗑️ Remove", key=f"remove_customer_{customer['id']}", type="secondary"):
+                                st.session_state[f"removing_{customer['id']}"] = True
+                                st.rerun()
+                        else:
+                            st.button(f"🚫 Remove", key=f"remove_customer_{customer['id']}", 
+                                     disabled=True, 
+                                     help=f"Cannot delete - has {', '.join(blocking_records)}")
+                    
+                    # Remove confirmation
+                    if st.session_state.get(f"removing_{customer['id']}", False):
+                        st.warning(f"⚠️ Confirm removal of customer: **{customer['name']}**")
+                        confirm_col, cancel_col = st.columns(2)
+                        
+                        with confirm_col:
+                            if st.button(f"Yes, Remove", key=f"confirm_remove_btn_{customer['id']}", type="primary"):
+                                # Remove customer from database
+                                from database import delete_from_database
+                                if delete_from_database('customers', customer['id']):
+                                    # Remove customer from session state
+                                    st.session_state.customers = [c for c in st.session_state.customers if c['id'] != customer['id']]
+                                    st.success(f"Customer '{customer['name']}' removed successfully!")
+                                else:
+                                    st.error(f"Failed to remove customer '{customer['name']}' from database")
+                                del st.session_state[f"removing_{customer['id']}"]
+                                st.rerun()
+                        
+                        with cancel_col:
+                            if st.button(f"Cancel", key=f"cancel_remove_btn_{customer['id']}"):
+                                del st.session_state[f"removing_{customer['id']}"]
+                                st.rerun()
+                else:
+                    st.info("Edit/Remove permissions restricted")
+                
+                # Show recent activity
+                recent_bookings = sorted(customer_bookings, key=lambda x: x.get('created_date', ''), reverse=True)[:3]
+                if recent_bookings:
+                    st.markdown("**Recent Bookings:**")
+                    for booking in recent_bookings:
+                        st.write(f"• {booking['booking_number']} - {booking['status']}")
+            
+            # Edit form
+            if st.session_state.get(f"editing_customer_{customer['id']}", False):
+                st.markdown("---")
+                st.markdown("**Edit Customer Information:**")
+                
+                edit_col1, edit_col2 = st.columns(2)
+                
+                with edit_col1:
+                    new_name = st.text_input("Customer Name*", value=customer['name'], key=f"edit_name_{customer['id']}")
+                    new_phone = st.text_input("Phone", value=customer.get('phone', ''), key=f"edit_phone_{customer['id']}")
+                    new_email = st.text_input("Email", value=customer.get('email', ''), key=f"edit_email_{customer['id']}")
+                
+                with edit_col2:
+                    new_address = st.text_area("Address", value=customer.get('address', ''), key=f"edit_address_{customer['id']}")
+                    new_payment_terms = st.selectbox("Payment Terms (Days)", 
+                                                   options=[15, 30, 45, 60, 90], 
+                                                   index=[15, 30, 45, 60, 90].index(customer.get('payment_terms', 30)),
+                                                   key=f"edit_terms_{customer['id']}")
+                
+                save_col, cancel_col = st.columns(2)
+                
+                with save_col:
+                    if st.button(f"💾 Save Changes", key=f"save_customer_{customer['id']}", type="primary"):
+                        # Update customer data
+                        customer['name'] = new_name
+                        customer['phone'] = new_phone
+                        customer['email'] = new_email
+                        customer['address'] = new_address
+                        customer['payment_terms'] = new_payment_terms
+                        
+                        # Update in database
+                        from database import update_in_database
+                        update_success = update_in_database('customers', {
+                            'name': new_name,
+                            'phone': new_phone,
+                            'email': new_email,
+                            'address': new_address,
+                            'payment_terms': new_payment_terms
+                        }, customer['id'])
+                        
+                        if update_success:
+                            # Update related records
+                            for booking in st.session_state.bookings:
+                                if booking.get('customer_id') == customer['id']:
+                                    booking['customer_name'] = new_name
+                            
+                            for invoice in st.session_state.invoices:
+                                if invoice.get('customer_id') == customer['id']:
+                                    invoice['customer_name'] = new_name
+                            
+                            st.success(f"Customer {new_name} updated successfully!")
+                        else:
+                            st.error(f"Failed to update customer {new_name} in database")
+                        
+                        # Clear editing state
+                        del st.session_state[f"editing_customer_{customer['id']}"]
+                        st.rerun()
+                
+                with cancel_col:
+                    if st.button(f"❌ Cancel", key=f"cancel_customer_{customer['id']}"):
+                        del st.session_state[f"editing_customer_{customer['id']}"]
+                        st.rerun()
+    
+    # Export customers
+    st.markdown("---")
+    if st.button("📊 Export Customer List"):
+        df = pd.DataFrame([
+            {
+                'Name': customer['name'],
+                'Phone': customer.get('phone', ''),
+                'Email': customer.get('email', ''),
+                'Address': customer.get('address', ''),
+                'Payment Terms': customer.get('payment_terms', 30),
+                'Created Date': customer.get('created_date', '')
+            }
+            for customer in unique_customers.values()
+        ])
+        csv = df.to_csv(index=False)
+        st.download_button(
+            label="Download Customer List CSV",
+            data=csv,
+            file_name=f"customers_{datetime.datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv"
+        )
+
+def manage_unallocated_balances():
+    """Manage customer unallocated payment balances"""
+    st.subheader("💳 Unallocated Balance Management")
+    st.info("View and allocate customer payments that were not assigned to specific invoices")
+    
+    # Calculate unallocated balances for each customer
+    customer_balances = {}
+    
+    for payment in st.session_state.customer_payments:
+        customer_id = payment['customer_id']
+        customer_name = payment['customer_name']
+        
+        if customer_id not in customer_balances:
+            customer_balances[customer_id] = {
+                'customer_name': customer_name,
+                'unallocated_amount': 0,
+                'unallocated_payments': []
+            }
+        
+        # Check if payment has unallocated amount
+        unallocated = payment.get('unallocated_amount', 0)
+        if unallocated > 0:
+            customer_balances[customer_id]['unallocated_amount'] += unallocated
+            customer_balances[customer_id]['unallocated_payments'].append(payment)
+    
+    # Filter customers with unallocated balances
+    customers_with_balance = {k: v for k, v in customer_balances.items() if v['unallocated_amount'] > 0}
+    
+    if not customers_with_balance:
+        st.success("🎉 No unallocated balances found! All payments are properly allocated.")
+        return
+    
+    # Summary metrics
+    total_unallocated = sum(data['unallocated_amount'] for data in customers_with_balance.values())
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Customers with Unallocated Balances", len(customers_with_balance))
+    with col2:
+        st.metric("Total Unallocated Amount", f"₹{total_unallocated:,.2f}")
+    with col3:
+        st.metric("Average per Customer", f"₹{total_unallocated / len(customers_with_balance):,.2f}")
+    
+    st.markdown("---")
+    
+    # Display customers with unallocated balances
+    for customer_id, balance_data in customers_with_balance.items():
+        customer_name = balance_data['customer_name']
+        unallocated_amount = balance_data['unallocated_amount']
+        
+        # Get pending invoices for this customer
+        pending_invoices = [inv for inv in st.session_state.invoices 
+                          if inv['customer_id'] == customer_id and inv['outstanding_amount'] > 0]
+        
+        with st.expander(f"💰 {customer_name} - Unallocated: ₹{unallocated_amount:,.2f}"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**Unallocated Payments:**")
+                for payment in balance_data['unallocated_payments']:
+                    st.write(f"• {payment['payment_date']} - ₹{payment.get('unallocated_amount', 0):,.2f} ({payment['payment_mode']})")
+                    if payment.get('reference_number'):
+                        st.write(f"  Ref: {payment['reference_number']}")
+            
+            with col2:
+                st.markdown("**Pending Invoices:**")
+                if pending_invoices:
+                    for invoice in pending_invoices:
+                        days_overdue = max(0, (datetime.datetime.now().date() - invoice['due_date']).days)
+                        overdue_text = f" ({days_overdue} days overdue)" if days_overdue > 0 else ""
+                        st.write(f"• {invoice['invoice_number']} - ₹{invoice['outstanding_amount']:,.2f}{overdue_text}")
+                else:
+                    st.info("No pending invoices to allocate to")
+            
+            # Allocation interface
+            if pending_invoices:
+                st.markdown("**Allocate Balance to Invoices:**")
+                
+                # Select invoice to allocate to
+                invoice_options = [f"{inv['invoice_number']} - ₹{inv['outstanding_amount']:,.2f}" for inv in pending_invoices]
+                selected_invoice_idx = st.selectbox(
+                    "Select Invoice",
+                    range(len(invoice_options)),
+                    format_func=lambda x: invoice_options[x],
+                    key=f"allocate_invoice_{customer_id}"
+                )
+                
+                selected_invoice = pending_invoices[selected_invoice_idx]
+                
+                # Amount to allocate
+                max_allocation = min(unallocated_amount, selected_invoice['outstanding_amount'])
+                allocation_amount = st.number_input(
+                    "Amount to Allocate (₹)",
+                    min_value=0.01,
+                    max_value=float(max_allocation),
+                    value=float(max_allocation),
+                    key=f"allocate_amount_{customer_id}"
+                )
+                
+                # Allocate button
+                if st.button(f"💱 Allocate ₹{allocation_amount:,.2f}", key=f"allocate_btn_{customer_id}"):
+                    # Update invoice outstanding (ensure both are same type)
+                    from decimal import Decimal
+                    current_outstanding = Decimal(str(selected_invoice['outstanding_amount']))
+                    allocation_decimal = Decimal(str(allocation_amount))
+                    selected_invoice['outstanding_amount'] = float(current_outstanding - allocation_decimal)
+                    
+                    # Update invoice status
+                    if selected_invoice['outstanding_amount'] <= 0:
+                        selected_invoice['status'] = 'Paid'
+                    elif selected_invoice['status'] == 'Generated':
+                        selected_invoice['status'] = 'Partially Paid'
+                    
+                    # Update unallocated amounts in payments (FIFO basis)
+                    remaining_to_allocate = allocation_amount
+                    
+                    for payment in balance_data['unallocated_payments']:
+                        if remaining_to_allocate <= 0:
+                            break
+                        
+                        current_unallocated = payment.get('unallocated_amount', 0)
+                        if current_unallocated > 0:
+                            allocation_from_payment = min(remaining_to_allocate, current_unallocated)
+                            payment['unallocated_amount'] -= allocation_from_payment
+                            remaining_to_allocate -= allocation_from_payment
+                            
+                            # Add allocation record
+                            if 'allocated_invoices' not in payment:
+                                payment['allocated_invoices'] = []
+                            
+                            payment['allocated_invoices'].append({
+                                'invoice_id': selected_invoice['id'],
+                                'invoice_number': selected_invoice['invoice_number'],
+                                'allocated_amount': allocation_from_payment,
+                                'allocation_date': datetime.datetime.now()
+                            })
+                    
+                    # Track the allocation
+                    from .notes import track_status_change
+                    track_status_change(
+                        record_id=selected_invoice['id'],
+                        record_type='invoice',
+                        old_status=selected_invoice.get('old_status', 'Generated'),
+                        new_status=selected_invoice['status'],
+                        notes=f'Allocated ₹{allocation_amount:,.2f} from unallocated balance',
+                        additional_data={
+                            'invoice_number': selected_invoice['invoice_number'],
+                            'customer_name': customer_name,
+                            'allocated_amount': allocation_amount,
+                            'remaining_outstanding': selected_invoice['outstanding_amount']
+                        }
+                    )
+                    
+                    st.success(f"✅ Allocated ₹{allocation_amount:,.2f} to Invoice {selected_invoice['invoice_number']}")
+                    st.rerun()
+            
+            else:
+                # Option to create credit note or refund
+                st.markdown("**No Pending Invoices - Options:**")
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    if st.button(f"📋 Create Credit Note", key=f"credit_{customer_id}"):
+                        st.info("Credit note creation feature - to be implemented")
+                
+                with col2:
+                    if st.button(f"💸 Issue Refund", key=f"refund_{customer_id}"):
+                        st.info("Refund processing feature - to be implemented")
+    
+    # Export unallocated balances
+    st.markdown("---")
+    if st.button("📊 Export Unallocated Balances"):
+        export_data = []
+        for customer_id, balance_data in customers_with_balance.items():
+            export_data.append({
+                'Customer Name': balance_data['customer_name'],
+                'Unallocated Amount': balance_data['unallocated_amount'],
+                'Number of Payments': len(balance_data['unallocated_payments']),
+                'Oldest Payment Date': min(p['payment_date'] for p in balance_data['unallocated_payments']) if balance_data['unallocated_payments'] else None
+            })
+        
+        df = pd.DataFrame(export_data)
+        csv = df.to_csv(index=False)
+        st.download_button(
+            label="Download Unallocated Balances CSV",
+            data=csv,
+            file_name=f"unallocated_balances_{datetime.datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv"
+        )

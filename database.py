@@ -25,7 +25,32 @@ def get_cached_data(table_name, limit=None):
             query += f" LIMIT {limit}"
         
         result = execute_query(query, fetch=True)
-        return [dict(row) for row in result] if result else []
+        
+        if result:
+            processed_data = []
+            for row in result:
+                row_dict = dict(row)
+                
+                # Handle JSON deserialization for specific fields
+                json_fields = {
+                    'customer_payments': ['allocated_invoices'],
+                    'bookings': [],  # Add any JSON fields for bookings if needed
+                    'invoices': [],  # Add any JSON fields for invoices if needed
+                }
+                
+                if table_name in json_fields:
+                    for field in json_fields[table_name]:
+                        if field in row_dict and row_dict[field]:
+                            try:
+                                row_dict[field] = json.loads(row_dict[field])
+                            except (json.JSONDecodeError, TypeError):
+                                row_dict[field] = row_dict[field]  # Keep original if not JSON
+                
+                processed_data.append(row_dict)
+            
+            return processed_data
+        
+        return []
     except Exception as e:
         st.error(f"Error fetching {table_name}: {e}")
         return []
@@ -53,6 +78,10 @@ def load_data_when_needed(data_type):
             st.session_state.fuel_logs = get_cached_data('fuel_logs', limit=200)
         elif data_type == 'odometer_logs':
             st.session_state.odometer_logs = get_cached_data('odometer_logs', limit=200)
+        elif data_type == 'notes':
+            st.session_state.notes = get_cached_data('notes', limit=500)  # Status change notes
+        elif data_type == 'vendor_bills':
+            st.session_state.vendor_bills = get_cached_data('vendor_bills', limit=100)
         # Add other data types as needed
     
     return st.session_state[data_type]
@@ -368,6 +397,35 @@ def init_database():
             )
         """)
         
+        # Create notes table for status tracking
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS notes (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                record_id UUID NOT NULL,
+                record_type VARCHAR(50) NOT NULL,
+                old_status VARCHAR(50),
+                new_status VARCHAR(50) NOT NULL,
+                change_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                changed_by VARCHAR(100) DEFAULT 'Admin',
+                notes TEXT,
+                additional_data JSONB,
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Create index for faster queries
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_notes_record_id ON notes(record_id);
+        """)
+        
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_notes_record_type ON notes(record_type);
+        """)
+        
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_notes_change_date ON notes(change_date);
+        """)
+        
         # Create counters table for number generation
         cur.execute("""
             CREATE TABLE IF NOT EXISTS counters (
@@ -460,6 +518,10 @@ def add_to_database(table_name, data):
                 data[key] = value.isoformat()
             elif hasattr(value, 'date'):  # date objects
                 data[key] = value.isoformat()
+            elif isinstance(value, (dict, list)):  # Handle dict/list objects
+                data[key] = json.dumps(value)
+            elif value is None:
+                data[key] = None  # Keep None as NULL
         
         # Convert data dict to insert query
         columns = ', '.join(data.keys())
@@ -505,6 +567,10 @@ def update_in_database(table_name, data, record_id):
                 data[key] = value.isoformat()
             elif hasattr(value, 'date'):
                 data[key] = value.isoformat()
+            elif isinstance(value, (dict, list)):  # Handle dict/list objects
+                data[key] = json.dumps(value)
+            elif value is None:
+                data[key] = None  # Keep None as NULL
         
         # Build update query
         set_clause = ', '.join([f"{key} = %s" for key in data.keys()])
@@ -687,11 +753,53 @@ def fix_database_schema():
             ("bookings", "created_by", "VARCHAR(100) DEFAULT 'Admin'"),
             ("bookings", "can_edit", "BOOLEAN DEFAULT true"),
             
-            # invoices table
+            # invoices table - add missing columns
+            ("invoices", "pickup_location", "TEXT"),
+            ("invoices", "delivery_location", "TEXT"),
+            ("invoices", "pickup_date", "DATE"),
+            ("invoices", "vehicle_number", "VARCHAR(50)"),
+            ("invoices", "driver_name", "VARCHAR(255)"),
+            ("invoices", "distance_km", "DECIMAL(10,2)"),
+            ("invoices", "base_amount", "DECIMAL(10,2)"),
+            ("invoices", "booking_loading_charges", "DECIMAL(10,2) DEFAULT 0"),
+            ("invoices", "booking_unloading_charges", "DECIMAL(10,2) DEFAULT 0"),
+            ("invoices", "booking_airport_pass_charges", "DECIMAL(10,2) DEFAULT 0"),
+            ("invoices", "booking_halting_charges", "DECIMAL(10,2) DEFAULT 0"),
+            ("invoices", "booking_fuel_charges", "DECIMAL(10,2) DEFAULT 0"),
+            ("invoices", "booking_toll_charges", "DECIMAL(10,2) DEFAULT 0"),
+            ("invoices", "booking_other_charges", "DECIMAL(10,2) DEFAULT 0"),
+            ("invoices", "booking_discount", "DECIMAL(10,2) DEFAULT 0"),
+            ("invoices", "additional_fuel", "DECIMAL(10,2) DEFAULT 0"),
+            ("invoices", "additional_toll", "DECIMAL(10,2) DEFAULT 0"),
+            ("invoices", "additional_loading", "DECIMAL(10,2) DEFAULT 0"),
+            ("invoices", "additional_detention", "DECIMAL(10,2) DEFAULT 0"),
+            ("invoices", "additional_misc", "DECIMAL(10,2) DEFAULT 0"),
+            ("invoices", "additional_charges", "DECIMAL(10,2) DEFAULT 0"),
+            ("invoices", "extra_discount", "DECIMAL(10,2) DEFAULT 0"),
+            ("invoices", "total_discount", "DECIMAL(10,2) DEFAULT 0"),
+            ("invoices", "subtotal", "DECIMAL(10,2) DEFAULT 0"),
+            ("invoices", "gst_applicable", "BOOLEAN DEFAULT false"),
+            ("invoices", "gst_rate", "INTEGER DEFAULT 0"),
+            ("invoices", "gst_type", "VARCHAR(20)"),
+            ("invoices", "invoice_notes", "TEXT"),
+            ("invoices", "contract_start_date", "DATE"),
+            ("invoices", "contract_end_date", "DATE"),
+            ("invoices", "contract_period", "VARCHAR(50)"),
             ("invoices", "created_by", "VARCHAR(100) DEFAULT 'Admin'"),
             
             # customer_payments table
             ("customer_payments", "created_by", "VARCHAR(100) DEFAULT 'Admin'"),
+            ("customer_payments", "invoice_id", "UUID"),
+            ("customer_payments", "allocation_type", "VARCHAR(100)"),
+            ("customer_payments", "unallocated_amount", "DECIMAL(10,2) DEFAULT 0"),
+            ("customer_payments", "allocated_invoices", "JSONB"),
+            ("customer_payments", "reference_number", "VARCHAR(100)"),
+            ("customer_payments", "bank_details", "TEXT"),
+            ("customer_payments", "bank_name", "VARCHAR(100)"),
+            ("customer_payments", "notes", "TEXT"),
+            ("customer_payments", "payment_method", "VARCHAR(50)"),
+            ("customer_payments", "amount", "DECIMAL(10,2)"),
+            ("customer_payments", "payment_status", "VARCHAR(20) DEFAULT 'Completed'"),
             
             # vendor_payments table
             ("vendor_payments", "created_by", "VARCHAR(100) DEFAULT 'Admin'"),
