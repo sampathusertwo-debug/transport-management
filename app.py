@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 import uuid
 
 # Import modules
-from modules import quotations, bookings, invoicing, customer_payments, vendor_management, company_expenses, vehicle_master, dashboard, audit_exports, notes
+from modules import quotations, bookings, invoicing, customer_payments, vendor_management, company_expenses, vehicle_master, dashboard, audit_exports, notes, user_management
 
 # Import database functions
 from database import init_database, execute_query, get_next_counter_value, save_to_database, update_in_database, refresh_data
@@ -78,7 +78,10 @@ def init_session_state():
             st.error("Failed to connect to database")
             st.stop()
     
-    # Initialize session state variables
+    # Check for existing session before initializing defaults
+    check_stored_session()
+    
+    # Initialize session state variables (only if not already set by session restore)
     if 'authenticated' not in st.session_state:
         st.session_state.authenticated = False
     if 'user_role' not in st.session_state:
@@ -118,7 +121,21 @@ def init_session_state():
 
 def authenticate_user(username, password):
     """Authenticate user credentials"""
-    # Demo users - in production, this would connect to a database
+    # First try database authentication
+    from database import authenticate_user_db
+    user = authenticate_user_db(username, password)
+    
+    if user:
+        return {
+            'role': user['role'],
+            'full_name': f"{user['first_name']} {user['last_name']}",
+            'user_id': user['id'],
+            'password_changed': user['password_changed'],
+            'temp_password': user.get('temp_password'),
+            'email': user['email']
+        }
+    
+    # Fallback to demo users for backward compatibility
     users = {
         'admin': {
             'password': 'admin123',
@@ -143,6 +160,9 @@ def authenticate_user(username, password):
 
 def show_login_page():
     """Display the login page"""
+    # Check for stored session in query params
+    check_stored_session()
+    
     st.markdown('''
     <div class="login-container">
         <div class="login-card">
@@ -151,6 +171,11 @@ def show_login_page():
         </div>
     </div>
     ''', unsafe_allow_html=True)
+    
+    # Check if user needs to change password
+    if st.session_state.get('password_change_required'):
+        show_password_change_form()
+        return
     
     # Center the login form
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -162,61 +187,201 @@ def show_login_page():
             username = st.text_input("Username", placeholder="Enter your username")
             password = st.text_input("Password", type="password", placeholder="Enter your password")
             
-            col_login, col_demo = st.columns(2)
-            
-            with col_login:
-                login_button = st.form_submit_button("Login", use_container_width=True, type="primary")
-            
-            with col_demo:
-                demo_button = st.form_submit_button("Demo Login", use_container_width=True)
+            login_button = st.form_submit_button("Login", use_container_width=True, type="primary")
             
             if login_button:
                 if username and password:
                     user = authenticate_user(username, password)
                     if user:
-                        st.session_state.authenticated = True
-                        st.session_state.username = username
-                        st.session_state.user_role = user['role']
-                        st.session_state.user_full_name = user['full_name']
-                        st.success(f"Welcome, {user['full_name']}!")
-                        st.rerun()
+                        # Check if password change is required
+                        if user.get('password_changed') == False:
+                            st.session_state.username = username
+                            st.session_state.user_role = user['role']
+                            st.session_state.user_full_name = user['full_name']
+                            st.session_state.user_id = user.get('user_id')
+                            st.session_state.password_change_required = True
+                            st.session_state.temp_password = user.get('temp_password')
+                            st.info("Password change required for first login")
+                            st.rerun()
+                        else:
+                            # Store session data
+                            store_session(username, user['role'], user['full_name'], user.get('user_id'))
+                            st.session_state.authenticated = True
+                            st.session_state.username = username
+                            st.session_state.user_role = user['role']
+                            st.session_state.user_full_name = user['full_name']
+                            st.session_state.user_id = user.get('user_id')
+                            st.session_state.last_activity = datetime.datetime.now()
+                            st.success(f"Welcome, {user['full_name']}!")
+                            st.rerun()
                     else:
                         st.error("Invalid username or password")
                 else:
                     st.error("Please enter both username and password")
-            
-            if demo_button:
-                # Demo login as admin
-                st.session_state.authenticated = True
-                st.session_state.username = 'admin'
-                st.session_state.user_role = 'Administrator'
-                st.session_state.user_full_name = 'Admin User'
-                st.success("Demo login successful!")
-                st.rerun()
+
+def show_password_change_form():
+    """Display password change form for first-time login"""
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        st.markdown("### 🔑 Change Password Required")
+        st.info("This is your first login. Please change your password to continue.")
         
-        # Demo credentials info
-        with st.expander("🔍 Demo Credentials"):
-            st.markdown("""
-            **Administrator:**
-            - Username: `admin`
-            - Password: `admin123`
+        if st.session_state.get('temp_password'):
+            st.markdown(f"**Your temporary password is:** `{st.session_state.temp_password}`")
+        
+        with st.form("password_change_form"):
+            new_password = st.text_input("New Password", type="password", placeholder="Enter new password")
+            confirm_password = st.text_input("Confirm Password", type="password", placeholder="Confirm new password")
             
-            **Manager:**
-            - Username: `manager`
-            - Password: `manager123`
+            col_change, col_cancel = st.columns(2)
             
-            **Operator:**
-            - Username: `operator`
-            - Password: `operator123`
-            """)
+            with col_change:
+                change_button = st.form_submit_button("Change Password", type="primary", use_container_width=True)
+            
+            with col_cancel:
+                cancel_button = st.form_submit_button("Cancel", use_container_width=True)
+            
+            if change_button:
+                if not new_password:
+                    st.error("Please enter a new password")
+                elif len(new_password) < 6:
+                    st.error("Password must be at least 6 characters long")
+                elif new_password != confirm_password:
+                    st.error("Passwords do not match")
+                else:
+                    # Update password
+                    from database import update_user_password
+                    success, message = update_user_password(st.session_state.username, new_password)
+                    
+                    if success:
+                        st.success("Password changed successfully!")
+                        # Clear password change requirement and authenticate
+                        st.session_state.password_change_required = False
+                        st.session_state.authenticated = True
+                        if 'temp_password' in st.session_state:
+                            del st.session_state['temp_password']
+                        st.rerun()
+                    else:
+                        st.error(f"Failed to change password: {message}")
+            
+            if cancel_button:
+                # Clear session and return to login
+                st.session_state.clear()
+                st.rerun()
 
 def logout_user():
     """Logout the current user"""
-    st.session_state.authenticated = False
-    st.session_state.username = None
-    st.session_state.user_role = None
-    st.session_state.user_full_name = None
+    # Clear session cookie
+    clear_session_cookie()
+    
+    # Clear all session state
+    keys_to_clear = ['authenticated', 'username', 'user_role', 'user_full_name', 'user_id', 'last_activity', 'session_token']
+    for key in keys_to_clear:
+        if key in st.session_state:
+            del st.session_state[key]
     st.rerun()
+
+def store_session(username, role, full_name, user_id):
+    """Store session data in cookies"""
+    import time
+    import hashlib
+    
+    # Create session token
+    timestamp = str(int(time.time()))
+    session_data = f"{username}|{role}|{full_name}|{user_id or ''}|{timestamp}"
+    
+    # Store in cookie using JavaScript
+    st.components.v1.html(f"""
+    <script>
+        document.cookie = "stranz_session={session_data}; path=/; max-age=7200"; // 2 hours
+        document.cookie = "stranz_activity={timestamp}; path=/; max-age=7200";
+    </script>
+    """, height=0)
+    
+    # Also store in session state
+    st.session_state.session_token = session_data
+    st.session_state.last_activity = datetime.datetime.now()
+
+def get_cookie_value(cookie_name):
+    """Get cookie value using JavaScript"""
+    # This is a workaround since we can't directly access cookies in Streamlit
+    # We'll use session state persistence instead
+    return None
+
+def check_stored_session():
+    """Check for existing session and restore if valid"""
+    # Check if session data exists in session state from previous run
+    if hasattr(st.session_state, '_session_checked'):
+        return
+    
+    st.session_state._session_checked = True
+    
+    # Try to restore from session state persistence
+    if ('session_token' in st.session_state and 
+        'last_activity' in st.session_state and
+        not st.session_state.get('authenticated', False)):
+        
+        try:
+            # Check if session is still valid (within 20 minutes)
+            last_activity = st.session_state.last_activity
+            current_time = datetime.datetime.now()
+            time_diff = (current_time - last_activity).total_seconds() / 60
+            
+            if time_diff <= 20:  # Session still valid
+                # Parse session token
+                token_parts = st.session_state.session_token.split('|')
+                if len(token_parts) >= 4:
+                    username, role, full_name, user_id = token_parts[:4]
+                    
+                    # Restore session
+                    st.session_state.authenticated = True
+                    st.session_state.username = username
+                    st.session_state.user_role = role
+                    st.session_state.user_full_name = full_name
+                    st.session_state.user_id = user_id if user_id else None
+                    st.session_state.last_activity = current_time
+            else:
+                # Session expired, clear it
+                clear_session_data()
+        except Exception:
+            # Invalid session data, clear it
+            clear_session_data()
+
+def clear_session_cookie():
+    """Clear session cookies"""
+    st.components.v1.html("""
+    <script>
+        document.cookie = "stranz_session=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+        document.cookie = "stranz_activity=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+    </script>
+    """, height=0)
+
+def clear_session_data():
+    """Clear session data from session state"""
+    keys_to_clear = ['session_token', 'last_activity']
+    for key in keys_to_clear:
+        if key in st.session_state:
+            del st.session_state[key]
+
+def check_session_timeout():
+    """Check if session has timed out due to inactivity"""
+    if st.session_state.get('authenticated') and 'last_activity' in st.session_state:
+        current_time = datetime.datetime.now()
+        last_activity = st.session_state.last_activity
+        
+        # Check if inactive for more than 20 minutes
+        time_diff = (current_time - last_activity).total_seconds() / 60
+        
+        if time_diff > 20:
+            st.warning("⏰ Session expired due to inactivity. Please login again.")
+            logout_user()
+            return True
+        else:
+            # Update last activity on each interaction
+            st.session_state.last_activity = current_time
+    
+    return False
 
 def get_financial_year():
     """Get current financial year token (YYYY format for FY YYYY-YY+1)"""
@@ -291,6 +456,10 @@ def main():
     # Check authentication
     if not st.session_state.authenticated:
         show_login_page()
+        return
+    
+    # Check session timeout
+    if check_session_timeout():
         return
     
     # Custom CSS for modern UI design
@@ -653,6 +822,10 @@ def main():
             ("Audit Exports", "📤")
         ]
         
+        # Add User Management only for administrators
+        if st.session_state.get('user_role') == 'Administrator':
+            pages.append(("User Management", "👥"))
+        
         for page_name, icon in pages:
             if st.button(f"{icon} {page_name}", key=f"nav_{page_name}", use_container_width=True):
                 st.session_state.current_page = page_name
@@ -679,6 +852,8 @@ def main():
         notes.show()
     elif page == "Audit Exports":
         audit_exports.show()
+    elif page == "User Management":
+        user_management.show()
     
     # Footer
     st.markdown("---")

@@ -122,6 +122,26 @@ def init_database():
     try:
         cur = conn.cursor()
         
+        # Create users table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                username VARCHAR(100) UNIQUE NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                first_name VARCHAR(100) NOT NULL,
+                last_name VARCHAR(100) NOT NULL,
+                email VARCHAR(255) NOT NULL,
+                mobile_number VARCHAR(20),
+                role VARCHAR(50) DEFAULT 'User',
+                is_active BOOLEAN DEFAULT true,
+                password_changed BOOLEAN DEFAULT false,
+                temp_password VARCHAR(255),
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_login TIMESTAMP,
+                created_by VARCHAR(100) DEFAULT 'Admin'
+            )
+        """)
+        
         # Create customers table
         cur.execute("""
             CREATE TABLE IF NOT EXISTS customers (
@@ -442,6 +462,24 @@ def init_database():
             ON CONFLICT (counter_name) DO NOTHING
         """)
         
+        # Create default admin user if no users exist
+        cur.execute("SELECT COUNT(*) FROM users")
+        user_count = cur.fetchone()[0]
+        
+        if user_count == 0:
+            import hashlib
+            admin_password = "admin123"
+            password_hash = hashlib.sha256(admin_password.encode()).hexdigest()
+            
+            cur.execute("""
+                INSERT INTO users (username, password_hash, first_name, last_name, email, 
+                                 mobile_number, role, is_active, password_changed, created_by)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                'admin', password_hash, 'Admin', 'User', 'admin@stranz.in',
+                '', 'Administrator', True, True, 'System'
+            ))
+        
         conn.commit()
         cur.close()
         conn.close()
@@ -496,8 +534,175 @@ def refresh_data(data_type=None):
         get_cached_data.clear()
         for key in ['customers', 'quotations', 'bookings', 'invoices', 'customer_payments', 
                    'vendors', 'vendor_bills', 'vendor_payments', 'expenses', 'vehicles', 
-                   'drivers', 'fuel_logs', 'odometer_logs']:
+                   'drivers', 'fuel_logs', 'odometer_logs', 'users']:
             st.session_state[key] = []
+
+def authenticate_user_db(username, password):
+    """Authenticate user credentials from database"""
+    try:
+        import hashlib
+        password_hash = hashlib.sha256(password.encode()).hexdigest()
+        
+        query = """
+        SELECT id, username, first_name, last_name, email, mobile_number, role, 
+               is_active, password_changed, temp_password
+        FROM users 
+        WHERE username = %s AND password_hash = %s AND is_active = true
+        """
+        
+        result = execute_query(query, (username, password_hash), fetch=True)
+        
+        if result:
+            user = result[0]
+            # Update last login
+            update_query = "UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = %s"
+            execute_query(update_query, (user['id'],))
+            return user
+        return None
+        
+    except Exception as e:
+        st.error(f"Authentication error: {e}")
+        return None
+
+def create_user(user_data):
+    """Create a new user"""
+    try:
+        import hashlib
+        
+        # Hash the password
+        password_hash = hashlib.sha256(user_data['password'].encode()).hexdigest()
+        
+        # Check if username already exists
+        check_query = "SELECT id FROM users WHERE username = %s"
+        existing = execute_query(check_query, (user_data['username'],), fetch=True)
+        
+        if existing:
+            return False, "Username already exists"
+        
+        # Create user data for database
+        db_user_data = {
+            'username': user_data['username'],
+            'password_hash': password_hash,
+            'first_name': user_data['first_name'],
+            'last_name': user_data['last_name'],
+            'email': user_data['email'],
+            'mobile_number': user_data.get('mobile_number', ''),
+            'role': user_data.get('role', 'User'),
+            'temp_password': user_data['password'],  # Store temp password for first login
+            'created_by': user_data.get('created_by', 'Admin')
+        }
+        
+        result = add_to_database('users', db_user_data)
+        
+        if result:
+            refresh_data('users')
+            return True, "User created successfully"
+        else:
+            return False, "Failed to create user"
+            
+    except Exception as e:
+        return False, f"Error creating user: {e}"
+
+def update_user_password(username, new_password):
+    """Update user password"""
+    try:
+        import hashlib
+        password_hash = hashlib.sha256(new_password.encode()).hexdigest()
+        
+        query = """
+        UPDATE users 
+        SET password_hash = %s, password_changed = true, temp_password = NULL
+        WHERE username = %s
+        """
+        
+        result = execute_query(query, (password_hash, username))
+        
+        if result:
+            return True, "Password updated successfully"
+        else:
+            return False, "Failed to update password"
+            
+    except Exception as e:
+        return False, f"Error updating password: {e}"
+
+def reset_user_password(user_id, new_password):
+    """Reset user password and mark for change on next login"""
+    try:
+        import hashlib
+        password_hash = hashlib.sha256(new_password.encode()).hexdigest()
+        
+        query = """
+        UPDATE users 
+        SET password_hash = %s, password_changed = false, temp_password = %s
+        WHERE id = %s
+        """
+        
+        result = execute_query(query, (password_hash, new_password, user_id))
+        
+        if result:
+            refresh_data('users')
+            return True, "Password reset successfully"
+        else:
+            return False, "Failed to reset password"
+            
+    except Exception as e:
+        return False, f"Error resetting password: {e}"
+
+def get_all_users():
+    """Get all users from database"""
+    try:
+        query = """
+        SELECT id, username, first_name, last_name, email, mobile_number, 
+               role, is_active, password_changed, created_date, last_login, created_by
+        FROM users 
+        ORDER BY created_date DESC
+        """
+        
+        result = execute_query(query, fetch=True)
+        return result or []
+        
+    except Exception as e:
+        st.error(f"Error fetching users: {e}")
+        return []
+
+def toggle_user_status(user_id, is_active):
+    """Enable or disable user"""
+    try:
+        query = "UPDATE users SET is_active = %s WHERE id = %s"
+        result = execute_query(query, (is_active, user_id))
+        
+        if result:
+            refresh_data('users')
+            return True, f"User {'enabled' if is_active else 'disabled'} successfully"
+        else:
+            return False, "Failed to update user status"
+            
+    except Exception as e:
+        return False, f"Error updating user status: {e}"
+
+def delete_user(user_id):
+    """Delete user from database"""
+    try:
+        query = "DELETE FROM users WHERE id = %s"
+        result = execute_query(query, (user_id,))
+        
+        if result:
+            refresh_data('users')
+            return True, "User deleted successfully"
+        else:
+            return False, "Failed to delete user"
+            
+    except Exception as e:
+        return False, f"Error deleting user: {e}"
+
+def generate_random_password(length=8):
+    """Generate a random password"""
+    import random
+    import string
+    
+    characters = string.ascii_letters + string.digits + "!@#$%"
+    password = ''.join(random.choice(characters) for i in range(length))
+    return password
 
 def add_to_database(table_name, data):
     """Add new record to database and refresh cache"""
@@ -736,6 +941,20 @@ def fix_database_schema():
         
         # List of all column additions needed
         schema_fixes = [
+            # users table - ensure all columns exist
+            ("users", "username", "VARCHAR(100) UNIQUE"),
+            ("users", "password_hash", "VARCHAR(255)"),
+            ("users", "first_name", "VARCHAR(100)"),
+            ("users", "last_name", "VARCHAR(100)"),
+            ("users", "email", "VARCHAR(255)"),
+            ("users", "mobile_number", "VARCHAR(20)"),
+            ("users", "role", "VARCHAR(50) DEFAULT 'User'"),
+            ("users", "is_active", "BOOLEAN DEFAULT true"),
+            ("users", "password_changed", "BOOLEAN DEFAULT false"),
+            ("users", "temp_password", "VARCHAR(255)"),
+            ("users", "last_login", "TIMESTAMP"),
+            ("users", "created_by", "VARCHAR(100) DEFAULT 'Admin'"),
+            
             # customers table
             ("customers", "payment_terms", "INTEGER DEFAULT 30"),
             
