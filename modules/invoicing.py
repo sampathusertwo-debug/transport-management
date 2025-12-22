@@ -1105,84 +1105,77 @@ def generate_invoice_pdf(invoice):
     charges_data.append(['TRANSPORTATION CHARGES:', '', '', ''])
     
     # Base transportation charge
-    charges_data.append(['- Closed Truck (Base)', '1', f"{safe_float(invoice.get('base_amount')):.2f}", f"{safe_float(invoice.get('base_amount')):.2f}"])
+    charges_data.append(['- Transportation Service', '1', f"{safe_float(invoice.get('base_amount')):.2f}", f"{safe_float(invoice.get('base_amount')):.2f}"])
     
-    # Add booking charges if they exist
+    # Add all additional charges from invoice (these are the changes/additions)
+    additional_charges_added = False
+    
+    # Fuel charges - check all possible field names
+    fuel_charges = []
     if invoice.get('booking_fuel_charges', 0) > 0:
-        charges_data.append(['- Fuel Charges', '1', f"{safe_float(invoice.get('booking_fuel_charges')):.2f}", f"{safe_float(invoice.get('booking_fuel_charges')):.2f}"])
-    
-    if invoice.get('booking_toll_charges', 0) > 0:
-        charges_data.append(['- Toll Charges', '1', f"{safe_float(invoice.get('booking_toll_charges')):.2f}", f"{safe_float(invoice.get('booking_toll_charges')):.2f}"])
-    
-    # Add additional fuel and toll if any
+        fuel_charges.append(('Fuel (Booking)', safe_float(invoice.get('booking_fuel_charges', 0))))
     if invoice.get('additional_fuel', 0) > 0:
-        charges_data.append(['- Additional Fuel', '1', f"{safe_float(invoice.get('additional_fuel')):.2f}", f"{safe_float(invoice.get('additional_fuel')):.2f}"])
+        fuel_charges.append(('Additional Fuel', safe_float(invoice.get('additional_fuel', 0))))
+    if invoice.get('fuel_charges', 0) > 0:  # Legacy field
+        fuel_charges.append(('Fuel Charges', safe_float(invoice.get('fuel_charges', 0))))
     
+    for fuel_desc, fuel_amt in fuel_charges:
+        charges_data.append([f'- {fuel_desc}', '1', f"{fuel_amt:.2f}", f"{fuel_amt:.2f}"])
+        additional_charges_added = True
+    
+    # Toll charges - check all possible field names
+    toll_charges = []
+    if invoice.get('booking_toll_charges', 0) > 0:
+        toll_charges.append(('Toll (Booking)', safe_float(invoice.get('booking_toll_charges', 0))))
     if invoice.get('additional_toll', 0) > 0:
-        charges_data.append(['- Additional Toll', '1', f"{safe_float(invoice.get('additional_toll')):.2f}", f"{safe_float(invoice.get('additional_toll')):.2f}"])
+        toll_charges.append(('Additional Toll', safe_float(invoice.get('additional_toll', 0))))
+    if invoice.get('toll_charges', 0) > 0:  # Legacy field
+        toll_charges.append(('Toll Charges', safe_float(invoice.get('toll_charges', 0))))
     
-    # Calculate transportation subtotal
-    transportation_total = (safe_float(invoice.get('base_amount')) + 
-                          safe_float(invoice.get('booking_fuel_charges')) + 
-                          safe_float(invoice.get('booking_toll_charges')) +
-                          safe_float(invoice.get('additional_fuel')) + 
-                          safe_float(invoice.get('additional_toll')))
-    charges_data.append(['', 'Transportation Subtotal:', '', f"{transportation_total:.2f}"])
+    for toll_desc, toll_amt in toll_charges:
+        charges_data.append([f'- {toll_desc}', '1', f"{toll_amt:.2f}", f"{toll_amt:.2f}"])
+        additional_charges_added = True
     
-    # Other charges section
-    other_charges_total = 0
-    other_charges_exist = False
+    # Loading/Unloading charges
+    loading_charges = []
+    if invoice.get('booking_loading_charges', 0) > 0:
+        loading_charges.append(('Loading (Booking)', safe_float(invoice.get('booking_loading_charges', 0))))
+    if invoice.get('booking_unloading_charges', 0) > 0:
+        loading_charges.append(('Unloading (Booking)', safe_float(invoice.get('booking_unloading_charges', 0))))
+    if invoice.get('additional_loading', 0) > 0:
+        loading_charges.append(('Additional Loading', safe_float(invoice.get('additional_loading', 0))))
+    if invoice.get('loading_charges', 0) > 0:  # Legacy field
+        loading_charges.append(('Loading Charges', safe_float(invoice.get('loading_charges', 0))))
     
-    # Check if we have any other charges
-    booking_other_total = (safe_float(invoice.get('booking_loading_charges')) + 
-                          safe_float(invoice.get('booking_unloading_charges')) +
-                          safe_float(invoice.get('booking_airport_pass_charges')) +
-                          safe_float(invoice.get('booking_halting_charges')) +
-                          safe_float(invoice.get('booking_other_charges')))
+    for loading_desc, loading_amt in loading_charges:
+        charges_data.append([f'- {loading_desc}', '1', f"{loading_amt:.2f}", f"{loading_amt:.2f}"])
+        additional_charges_added = True
     
-    additional_other_total = (safe_float(invoice.get('additional_loading')) + 
-                             safe_float(invoice.get('additional_detention')) +
-                             safe_float(invoice.get('additional_misc')))
+    # Detention charges
+    if invoice.get('additional_detention', 0) > 0:
+        charges_data.append(['- Detention Charges', '1', f"{safe_float(invoice.get('additional_detention')):.2f}", f"{safe_float(invoice.get('additional_detention')):.2f}"])
+        additional_charges_added = True
     
-    if booking_other_total > 0 or additional_other_total > 0:
-        charges_data.append(['OTHER CHARGES:', '', '', ''])
-        other_charges_exist = True
-        
-        # Add booking charges
-        if invoice.get('booking_loading_charges', 0) > 0:
-            charges_data.append(['- Loading/Unloading Charges', '1', f"{safe_float(invoice.get('booking_loading_charges')):.2f}", f"{safe_float(invoice.get('booking_loading_charges')):.2f}"])
-            other_charges_total += safe_float(invoice.get('booking_loading_charges'))
-        
-        if invoice.get('booking_unloading_charges', 0) > 0:
-            charges_data.append(['- Unloading Charges', '1', f"{safe_float(invoice.get('booking_unloading_charges')):.2f}", f"{safe_float(invoice.get('booking_unloading_charges')):.2f}"])
-            other_charges_total += safe_float(invoice.get('booking_unloading_charges'))
-        
-        if invoice.get('booking_airport_pass_charges', 0) > 0:
-            charges_data.append(['- Airport Pass Charges', '1', f"{safe_float(invoice.get('booking_airport_pass_charges')):.2f}", f"{safe_float(invoice.get('booking_airport_pass_charges')):.2f}"])
-            other_charges_total += safe_float(invoice.get('booking_airport_pass_charges'))
-        
-        if invoice.get('booking_halting_charges', 0) > 0:
-            charges_data.append(['- Halting Charges', '1', f"{safe_float(invoice.get('booking_halting_charges')):.2f}", f"{safe_float(invoice.get('booking_halting_charges')):.2f}"])
-            other_charges_total += safe_float(invoice.get('booking_halting_charges'))
-        
-        if invoice.get('booking_other_charges', 0) > 0:
-            charges_data.append(['- Other Charges', '1', f"{safe_float(invoice.get('booking_other_charges')):.2f}", f"{safe_float(invoice.get('booking_other_charges')):.2f}"])
-            other_charges_total += safe_float(invoice.get('booking_other_charges'))
-        
-        # Add additional charges
-        if invoice.get('additional_loading', 0) > 0:
-            charges_data.append(['- Additional Loading', '1', f"{safe_float(invoice.get('additional_loading')):.2f}", f"{safe_float(invoice.get('additional_loading')):.2f}"])
-            other_charges_total += safe_float(invoice.get('additional_loading'))
-        
-        if invoice.get('additional_detention', 0) > 0:
-            charges_data.append(['- Detention Charges', '1', f"{safe_float(invoice.get('additional_detention')):.2f}", f"{safe_float(invoice.get('additional_detention')):.2f}"])
-            other_charges_total += safe_float(invoice.get('additional_detention'))
-        
-        if invoice.get('additional_misc', 0) > 0:
-            charges_data.append(['- Miscellaneous Charges', '1', f"{safe_float(invoice.get('additional_misc')):.2f}", f"{safe_float(invoice.get('additional_misc')):.2f}"])
-            other_charges_total += safe_float(invoice.get('additional_misc'))
-        
-        charges_data.append(['', 'Other Charges Subtotal:', '', f"{other_charges_total:.2f}"])
+    # Other charges - combine various miscellaneous charges
+    other_charges = []
+    if invoice.get('booking_airport_pass_charges', 0) > 0:
+        other_charges.append(('Airport Pass', safe_float(invoice.get('booking_airport_pass_charges', 0))))
+    if invoice.get('booking_halting_charges', 0) > 0:
+        other_charges.append(('Halting', safe_float(invoice.get('booking_halting_charges', 0))))
+    if invoice.get('booking_other_charges', 0) > 0:
+        other_charges.append(('Other (Booking)', safe_float(invoice.get('booking_other_charges', 0))))
+    if invoice.get('additional_misc', 0) > 0:
+        other_charges.append(('Miscellaneous', safe_float(invoice.get('additional_misc', 0))))
+    if invoice.get('other_charges', 0) > 0:  # Legacy field
+        other_charges.append(('Other Charges', safe_float(invoice.get('other_charges', 0))))
+    
+    for other_desc, other_amt in other_charges:
+        charges_data.append([f'- {other_desc}', '1', f"{other_amt:.2f}", f"{other_amt:.2f}"])
+        additional_charges_added = True
+    
+    # Calculate total charges for subtotal display
+    total_charges = safe_float(invoice.get('subtotal', 0))
+    charges_data.append(['', '', 'TOTAL:', f"{total_charges:.2f}"])
     
     charges_table = Table(charges_data, colWidths=[3*inch, 0.8*inch, 1.2*inch, 1.2*inch])
     charges_table.setStyle(TableStyle([
@@ -1192,16 +1185,20 @@ def generate_invoice_pdf(invoice):
         ('ALIGN', (3, 0), (-1, -1), 'RIGHT'),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
         ('FONTSIZE', (0, 0), (-1, -1), 9),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
         ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
         ('FONTNAME', (0, 1), (0, 1), 'Helvetica-Bold'),  # Transportation charges header
+        ('LINEBELOW', (0, 0), (-1, 0), 1, colors.black),  # Line under header
+        ('LINEBELOW', (0, -1), (-1, -1), 1, colors.black),  # Line under total
+        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),  # Bold total row
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
     ]))
     
     # Add styling for other charges header if it exists
-    if other_charges_exist:
-        # Find the "OTHER CHARGES:" row and make it bold
+    if additional_charges_added:
+        # Find the "TRANSPORTATION CHARGES:" row and make it bold
         for i, row in enumerate(charges_data):
-            if row[0] == 'OTHER CHARGES:':
+            if row[0] == 'TRANSPORTATION CHARGES:':
                 charges_table.setStyle(TableStyle([
                     ('FONTNAME', (0, i), (0, i), 'Helvetica-Bold')
                 ]))
@@ -1213,10 +1210,17 @@ def generate_invoice_pdf(invoice):
     # Amount summary section
     amount_words = convert_amount_to_words(invoice['total_amount'])
     
+    # Calculate GST (18% of subtotal)
+    subtotal = safe_float(invoice.get('subtotal', 0))
+    gst_rate = 0.18  # 18% GST
+    gst_amount = subtotal * gst_rate
+    
     summary_data = [
-        ['AMOUNT IN WORDS:', 'SUBTOTAL:', f"{invoice['subtotal']:.2f}"],
-        [Paragraph(amount_words, ParagraphStyle('AmountWords', parent=styles['Normal'], fontSize=8, fontName='Helvetica')), 'ADVANCE PAID:', f"{invoice.get('advance_paid', 0):.2f}"],
-        ['', 'BALANCE DUE:', f"{invoice.get('outstanding_amount', invoice['total_amount']):.2f}"]
+        ['AMOUNT IN WORDS:', 'SUBTOTAL:', f"{subtotal:.2f}"],
+        [Paragraph(amount_words, ParagraphStyle('AmountWords', parent=styles['Normal'], fontSize=8, fontName='Helvetica')), 'GST (18%):', f"{gst_amount:.2f}"],
+        ['', 'TOTAL AMOUNT:', f"{subtotal + gst_amount:.2f}"],
+        ['', 'ADVANCE PAID:', f"{invoice.get('advance_paid', 0):.2f}"],
+        ['', 'BALANCE DUE:', f"{invoice.get('outstanding_amount', subtotal + gst_amount):.2f}"]
     ]
     
     summary_table = Table(summary_data, colWidths=[3.5*inch, 1.5*inch, 1.2*inch], rowHeights=[None, 25, None])
@@ -1227,8 +1231,11 @@ def generate_invoice_pdf(invoice):
         ('FONTNAME', (0, 0), (0, 0), 'Helvetica-Bold'),
         ('FONTNAME', (1, 0), (-1, -1), 'Helvetica-Bold'),
         ('FONTSIZE', (0, 0), (-1, -1), 9),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('LINEBELOW', (1, 0), (-1, 0), 1, colors.black),  # Line under headers
+        ('LINEBELOW', (1, -1), (-1, -1), 2, colors.black),  # Double line under balance due
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
     ]))
     
     elements.append(summary_table)

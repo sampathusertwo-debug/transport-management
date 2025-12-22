@@ -820,105 +820,249 @@ def manage_customers():
         )
 
 def generate_quotation_pdf(quotation):
-    """Generate PDF for quotation"""
+    """Generate PDF for quotation in S TRANZ format (same as invoice)"""
+    
+    def safe_float(value, default=0.0):
+        """Safely convert value to float, handling None and invalid values"""
+        if value is None:
+            return default
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return default
+    
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=18)
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     
     # Container for the 'Flowable' objects
     elements = []
     styles = getSampleStyleSheet()
     
     # Custom styles
-    title_style = ParagraphStyle(
-        'CustomTitle',
-        parent=styles['Heading1'],
-        fontSize=18,
-        spaceAfter=30,
-        alignment=1  # Center alignment
+    company_style = ParagraphStyle(
+        'CompanyStyle',
+        parent=styles['Normal'],
+        fontSize=14,
+        fontName='Helvetica-Bold',
+        spaceAfter=6,
+        textColor=colors.black
     )
     
-    # Header
-    title = Paragraph("STRANZ TRANSPORT MANAGEMENT", title_style)
-    elements.append(title)
-    elements.append(Spacer(1, 12))
+    quotation_title_style = ParagraphStyle(
+        'QuotationTitle',
+        parent=styles['Normal'],
+        fontSize=24,
+        fontName='Helvetica-Bold',
+        spaceAfter=12,
+        alignment=2,  # Right alignment
+        textColor=colors.black
+    )
     
-    # Quotation details
-    quote_title = Paragraph(f"<b>QUOTATION: {quotation['quotation_number']}</b>", styles['Heading2'])
-    elements.append(quote_title)
-    elements.append(Spacer(1, 12))
+    section_style = ParagraphStyle(
+        'SectionStyle',
+        parent=styles['Normal'],
+        fontSize=10,
+        fontName='Helvetica-Bold',
+        spaceAfter=6,
+        textColor=colors.black
+    )
     
-    # Customer and quotation info
-    info_data = [
-        ['Customer:', quotation['customer_name'], 'Date:', safe_format_date(quotation['created_date'])],
-        ['Pickup:', quotation['pickup_location'], 'Delivery:', quotation['delivery_location']],
-        ['Vehicle Type:', quotation['vehicle_type'], 'Trip Type:', quotation['trip_type']],
-        ['Distance:', f"{quotation['distance_km']} KM", 'Weight:', f"{quotation['weight_capacity']} {quotation.get('weight_unit', 'tons')}"],
-        ['Reference:', quotation.get('reference_number', 'N/A'), 'Payment Terms:', f"{quotation['payment_terms']} days"]
+    # Header with company info (same as invoice)
+    header_data = [
+        [
+            # Company Info Column
+            Paragraph("""<font color="black"><b>S TRANZ</b><br/>
+            NO.22, PADMALAYAM<br/>
+            1st STREET, SARASWATHIPURAM,<br/>
+            CHROMPET CHENNAI - 600044<br/>
+            GSTIN: 33CGPP57873Q1ZZ<br/>
+            Email: info.stranz@gmail.com<br/>
+            Phone: +91 73580 47373<br/>
+            www.Stranz.in</font>""", company_style),
+            # Quotation title
+            Paragraph('<font size="24"><b>QUOTATION</b></font>', quotation_title_style)
+        ]
     ]
     
-    info_table = Table(info_data, colWidths=[1.5*inch, 2.5*inch, 1.5*inch, 2*inch])
+    header_table = Table(header_data, colWidths=[4*inch, 3*inch])
+    header_table.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+        ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+    ]))
+    
+    elements.append(header_table)
+    elements.append(Spacer(1, 12))
+    
+    # Tax line (same as invoice)
+    tax_line = Paragraph('<b>TAX PAYABLE ON REVERSE CHARGE: YES</b>', ParagraphStyle(
+        'TaxLine', parent=styles['Normal'], fontSize=10, fontName='Helvetica-Bold', alignment=1))
+    elements.append(tax_line)
+    elements.append(Spacer(1, 12))
+    
+    # Quotation details and customer info section (matching invoice style)
+    customer = next((c for c in st.session_state.customers if c['name'] == quotation['customer_name']), None)
+    
+    info_data = [
+        [
+            # Left column - Customer info
+            Paragraph(f"""<b>QUOTATION TO:</b><br/>
+            {quotation['customer_name']}<br/>
+            {customer.get('address', 'N/A') if customer else 'N/A'}""", section_style),
+            # Right column - Quotation details
+            Paragraph(f"""<b>QUOTATION NO:</b>&nbsp;&nbsp;&nbsp;&nbsp;{quotation['quotation_number']}<br/>
+            <b>QUOTATION DATE:</b>&nbsp;&nbsp;&nbsp;&nbsp;{safe_format_date(quotation['created_date'])}<br/>
+            <b>VALID UNTIL:</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{safe_format_date(quotation['valid_until']) if quotation.get('valid_until') else 'N/A'}<br/>
+            <b>VEHICLE TYPE:</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{quotation['vehicle_type']}<br/>
+            <b>TRIP TYPE:</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{quotation['trip_type']}""", section_style)
+        ]
+    ]
+    
+    # Add route details
+    route_data = [
+        [
+            Paragraph(f"""<b>ROUTE DETAILS:</b><br/>
+            From: {quotation['pickup_location']}<br/>
+            To: {quotation['delivery_location']}<br/>
+            Distance: {quotation['distance_km']} KM""", section_style),
+            Paragraph(f"""<b>LOAD DETAILS:</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{quotation.get('material_type', 'GENERAL CARGO')}<br/>
+            <b>WEIGHT CAPACITY:</b>&nbsp;&nbsp;&nbsp;{quotation['weight_capacity']} {quotation.get('weight_unit', 'tons')}<br/>
+            <b>PAYMENT TERMS:</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{quotation['payment_terms']} days<br/>
+            <b>REFERENCE NO:</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{quotation.get('reference_number', 'N/A')}""", section_style)
+        ]
+    ]
+    
+    info_table = Table(info_data + route_data, colWidths=[3.5*inch, 3.5*inch])
     info_table.setStyle(TableStyle([
         ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-        ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 10),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
     ]))
     
     elements.append(info_table)
     elements.append(Spacer(1, 20))
     
-    # Charges table
-    charges_data = [['Description', 'Amount (₹)']]
-    charges_data.append(['Base Price', f"{quotation['base_price']:,.2f}"])
+    # Description section
+    desc_text = f"Route: {quotation['pickup_location']} to {quotation['delivery_location']}, Vehicle: {quotation['vehicle_type']}, Distance: {quotation['distance_km']} KM"
+    if quotation.get('special_instructions'):
+        desc_text += f", Instructions: {quotation['special_instructions']}"
     
+    description = Paragraph(f"<b>DESCRIPTION:</b><br/>{desc_text}", section_style)
+    elements.append(description)
+    elements.append(Spacer(1, 15))
+    
+    # Charges table in S TRANZ format (matching invoice)
+    charges_data = [
+        ['CHARGES', 'QTY', 'RATE', 'AMOUNT']
+    ]
+    
+    # Transportation charges section
+    charges_data.append(['TRANSPORTATION CHARGES:', '', '', ''])
+    charges_data.append(['- Transportation Service', '1', f"{safe_float(quotation.get('base_price')):.2f}", f"{safe_float(quotation.get('base_price')):.2f}"])
+    
+    # Additional charges
     if quotation.get('loading_charges', 0) > 0:
-        charges_data.append(['Loading Charges', f"{quotation['loading_charges']:,.2f}"])
+        charges_data.append([f'- Loading Charges', '1', f"{safe_float(quotation.get('loading_charges')):.2f}", f"{safe_float(quotation.get('loading_charges')):.2f}"])
     if quotation.get('unloading_charges', 0) > 0:
-        charges_data.append(['Unloading Charges', f"{quotation['unloading_charges']:,.2f}"])
-    if quotation.get('airport_pass_charges', 0) > 0:
-        charges_data.append(['Airport Pass Charges', f"{quotation['airport_pass_charges']:,.2f}"])
-    if quotation.get('halting_charges', 0) > 0:
-        charges_data.append(['Halting Charges', f"{quotation['halting_charges']:,.2f}"])
+        charges_data.append([f'- Unloading Charges', '1', f"{safe_float(quotation.get('unloading_charges')):.2f}", f"{safe_float(quotation.get('unloading_charges')):.2f}"])
     if quotation.get('fuel_surcharge', 0) > 0:
-        charges_data.append(['Fuel Surcharge', f"{quotation['fuel_surcharge']:,.2f}"])
+        charges_data.append([f'- Fuel Surcharge', '1', f"{safe_float(quotation.get('fuel_surcharge')):.2f}", f"{safe_float(quotation.get('fuel_surcharge')):.2f}"])
     if quotation.get('toll_charges', 0) > 0:
-        charges_data.append(['Toll Charges', f"{quotation['toll_charges']:,.2f}"])
+        charges_data.append([f'- Toll Charges', '1', f"{safe_float(quotation.get('toll_charges')):.2f}", f"{safe_float(quotation.get('toll_charges')):.2f}"])
+    if quotation.get('airport_pass_charges', 0) > 0:
+        charges_data.append([f'- Airport Pass', '1', f"{safe_float(quotation.get('airport_pass_charges')):.2f}", f"{safe_float(quotation.get('airport_pass_charges')):.2f}"])
+    if quotation.get('halting_charges', 0) > 0:
+        charges_data.append([f'- Halting Charges', '1', f"{safe_float(quotation.get('halting_charges')):.2f}", f"{safe_float(quotation.get('halting_charges')):.2f}"])
     if quotation.get('other_charges', 0) > 0:
-        charges_data.append(['Other Charges', f"{quotation['other_charges']:,.2f}"])
+        charges_data.append([f'- Other Charges', '1', f"{safe_float(quotation.get('other_charges')):.2f}", f"{safe_float(quotation.get('other_charges')):.2f}"])
     if quotation.get('discount', 0) > 0:
-        charges_data.append(['Discount', f"-{quotation['discount']:,.2f}"])
+        charges_data.append([f'- Discount', '1', f"-{safe_float(quotation.get('discount')):.2f}", f"-{safe_float(quotation.get('discount')):.2f}"])
     
-    charges_data.append(['Subtotal', f"{quotation['subtotal']:,.2f}"])
+    # Calculate subtotal and total with GST
+    subtotal = safe_float(quotation.get('subtotal', 0))
+    charges_data.append(['', '', 'SUBTOTAL:', f"{subtotal:.2f}"])
     
-    if quotation.get('gst_applicable', False):
-        charges_data.append(['GST (18%)', f"{quotation.get('gst_amount', 0):,.2f}"])
-    
-    charges_data.append(['Total Amount', f"{quotation['total_amount']:,.2f}"])
-    
-    charges_table = Table(charges_data, colWidths=[4*inch, 2*inch])
+    charges_table = Table(charges_data, colWidths=[3*inch, 0.8*inch, 1.2*inch, 1.2*inch])
     charges_table.setStyle(TableStyle([
         ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+        ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+        ('ALIGN', (2, 0), (-1, -1), 'RIGHT'),
+        ('ALIGN', (3, 0), (-1, -1), 'RIGHT'),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTNAME', (0, -2), (-1, -1), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 10),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-        ('BACKGROUND', (0, -1), (-1, -1), colors.lightgrey),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+        ('FONTNAME', (0, 1), (0, 1), 'Helvetica-Bold'),  # Transportation charges header
+        ('LINEBELOW', (0, 0), (-1, 0), 1, colors.black),  # Line under header
+        ('LINEBELOW', (0, -1), (-1, -1), 1, colors.black),  # Line under total
+        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),  # Bold total row
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
     ]))
     
     elements.append(charges_table)
+    elements.append(Spacer(1, 15))
+    
+    # Amount summary section (matching invoice format)
+    gst_rate = 0.18  # 18% GST
+    gst_amount = subtotal * gst_rate
+    total_with_gst = subtotal + gst_amount
+    
+    # Convert amount to words (reuse from invoicing)
+    from .invoicing import convert_amount_to_words
+    amount_words = convert_amount_to_words(total_with_gst)
+    
+    summary_data = [
+        ['AMOUNT IN WORDS:', 'SUBTOTAL:', f"{subtotal:.2f}"],
+        [Paragraph(amount_words, ParagraphStyle('AmountWords', parent=styles['Normal'], fontSize=8, fontName='Helvetica')), 'GST (18%):', f"{gst_amount:.2f}"],
+        ['', 'TOTAL AMOUNT:', f"{total_with_gst:.2f}"]
+    ]
+    
+    summary_table = Table(summary_data, colWidths=[3.5*inch, 1.5*inch, 1.2*inch], rowHeights=[None, 25, None])
+    summary_table.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+        ('ALIGN', (0, 1), (0, 1), 'LEFT'),
+        ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+        ('FONTNAME', (0, 0), (0, 0), 'Helvetica-Bold'),
+        ('FONTNAME', (1, 0), (-1, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('LINEBELOW', (1, 0), (-1, 0), 1, colors.black),  # Line under headers
+        ('LINEBELOW', (1, -1), (-1, -1), 2, colors.black),  # Double line under total
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+    ]))
+    
+    elements.append(summary_table)
     elements.append(Spacer(1, 20))
     
-    # Special instructions
-    if quotation.get('special_instructions'):
-        instructions_title = Paragraph("<b>Special Instructions:</b>", styles['Normal'])
-        elements.append(instructions_title)
-        instructions = Paragraph(quotation['special_instructions'], styles['Normal'])
-        elements.append(instructions)
-        elements.append(Spacer(1, 20))
+    # Bank details section (same as invoice)
+    bank_details = Paragraph("""
+    <b>BANK DETAILS:</b><br/>
+    Bank: &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;KARUR VYSYA BANK<br/>
+    A/C Name: &nbsp;&nbsp;&nbsp;S TRANZ<br/>
+    A/C No: &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;1650115000002749<br/>
+    IFSC Code: &nbsp;&nbsp;KVBL0001650<br/>
+    Branch: &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Pallavaram Branch
+    """, ParagraphStyle('BankDetails', parent=styles['Normal'], fontSize=9, fontName='Helvetica'))
+    
+    # Signature section
+    signature_data = [
+        [bank_details, 'For S Tranz']
+    ]
+    
+    signature_table = Table(signature_data, colWidths=[4*inch, 2.5*inch])
+    signature_table.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+        ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('FONTSIZE', (1, 0), (1, 0), 10),
+        ('FONTNAME', (1, 0), (1, 0), 'Helvetica-Bold'),
+    ]))
+    
+    elements.append(signature_table)
+    elements.append(Spacer(1, 15))
     
     # Terms and conditions
     terms = Paragraph("""
@@ -928,8 +1072,20 @@ def generate_quotation_pdf(quotation):
     3. Payment terms are as mentioned above.<br/>
     4. Goods once dispatched will not be taken back.<br/>
     5. Risk and insurance of goods in transit is to customer account.<br/>
-    """, styles['Normal'])
+    6. GST will be charged as applicable at the time of service.
+    """, ParagraphStyle('Terms', parent=styles['Normal'], fontSize=8, fontName='Helvetica'))
     elements.append(terms)
+    elements.append(Spacer(1, 10))
+    
+    # Footer (same as invoice)
+    footer = Paragraph("""
+    <para align="center">
+    THANKS FOR YOUR INTEREST. LOOKING FORWARD TO SERVING YOU<br/>
+    <i>(This quotation has been generated by our system and is valid without a physical signature)</i>
+    </para>
+    """, ParagraphStyle('Footer', parent=styles['Normal'], fontSize=8, alignment=1))
+    
+    elements.append(footer)
     
     # Build PDF
     doc.build(elements)

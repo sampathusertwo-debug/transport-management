@@ -97,12 +97,41 @@ def create_booking_from_quotation(quotation):
         st.write(f"**Customer:** {quotation['customer_name']}")
         st.write(f"**Route:** {quotation['pickup_location']} → {quotation['delivery_location']}")
         st.write(f"**Vehicle Type:** {quotation['vehicle_type']}")
+        st.write(f"**Trip Type:** {quotation['trip_type']}")
     
     with col2:
-        st.write(f"**Trip Type:** {quotation['trip_type']}")
+        st.write(f"**Distance:** {quotation['distance_km']} KM")
+        st.write(f"**Base Amount:** ₹{quotation.get('base_amount', 0):,.2f}")
         st.write(f"**Total Amount:** ₹{quotation['total_amount']:,.2f}")
         st.write(f"**Payment Terms:** {quotation['payment_terms']} days")
-        st.write(f"**Distance:** {quotation['distance_km']} KM")
+    
+    # Display detailed charges breakdown
+    st.markdown("**Charge Breakdown from Quotation:**")
+    charges_col1, charges_col2 = st.columns(2)
+    
+    with charges_col1:
+        if quotation.get('fuel_surcharge', 0) > 0:
+            st.write(f"• Fuel Surcharge: ₹{quotation['fuel_surcharge']:,.2f}")
+        if quotation.get('toll_charges', 0) > 0:
+            st.write(f"• Toll Charges: ₹{quotation['toll_charges']:,.2f}")
+        if quotation.get('loading_charges', 0) > 0:
+            st.write(f"• Loading Charges: ₹{quotation['loading_charges']:,.2f}")
+        if quotation.get('unloading_charges', 0) > 0:
+            st.write(f"• Unloading Charges: ₹{quotation['unloading_charges']:,.2f}")
+    
+    with charges_col2:
+        if quotation.get('airport_pass_charges', 0) > 0:
+            st.write(f"• Airport Pass: ₹{quotation['airport_pass_charges']:,.2f}")
+        if quotation.get('halting_charges', 0) > 0:
+            st.write(f"• Halting Charges: ₹{quotation['halting_charges']:,.2f}")
+        if quotation.get('other_charges', 0) > 0:
+            st.write(f"• Other Charges: ₹{quotation['other_charges']:,.2f}")
+        if quotation.get('discount', 0) > 0:
+            st.write(f"• Discount: -₹{quotation['discount']:,.2f}")
+    
+    # Show subtotal and GST details if available
+    if quotation.get('subtotal', 0) > 0:
+        st.info(f"**Subtotal:** ₹{quotation['subtotal']:,.2f} | **GST:** ₹{quotation.get('gst_amount', 0):,.2f} | **Total:** ₹{quotation['total_amount']:,.2f}")
     
     st.markdown("---")
     st.markdown("**Additional Booking Details**")
@@ -191,6 +220,15 @@ def create_booking_from_quotation(quotation):
             'weight_capacity': quotation.get('weight_capacity', 0),
             'weight_unit': quotation.get('weight_unit', 'kg'),
             'base_amount': quotation.get('base_amount', quotation['total_amount']),
+            # Transfer all charges from quotation (only fields that exist in bookings table)
+            'loading_charges': quotation.get('loading_charges', 0),
+            'unloading_charges': quotation.get('unloading_charges', 0),
+            'airport_pass_charges': quotation.get('airport_pass_charges', 0),
+            'halting_charges': quotation.get('halting_charges', 0),
+            'fuel_charges': quotation.get('fuel_surcharge', 0),  # quotations use 'fuel_surcharge'
+            'toll_charges': quotation.get('toll_charges', 0),
+            'other_charges': quotation.get('other_charges', 0),
+            'discount': quotation.get('discount', 0),
             'gst_applicable': quotation.get('gst_applicable', True),
             'gst_amount': quotation.get('gst_amount', 0),
             'advance_payment': 0,
