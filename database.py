@@ -82,6 +82,8 @@ def load_data_when_needed(data_type):
             st.session_state.notes = get_cached_data('notes', limit=500)  # Status change notes
         elif data_type == 'vendor_bills':
             st.session_state.vendor_bills = get_cached_data('vendor_bills', limit=100)
+        elif data_type == 'customer_payments':
+            st.session_state.customer_payments = get_cached_data('customer_payments', limit=200)
         # Add other data types as needed
     
     return st.session_state[data_type]
@@ -695,6 +697,36 @@ def delete_user(user_id):
     except Exception as e:
         return False, f"Error deleting user: {e}"
 
+def update_user(user_id, user_data):
+    """Update user information in database"""
+    try:
+        query = """
+        UPDATE users 
+        SET first_name = %s, 
+            last_name = %s, 
+            email = %s, 
+            mobile_number = %s, 
+            role = %s
+        WHERE id = %s
+        """
+        result = execute_query(query, (
+            user_data['first_name'],
+            user_data['last_name'], 
+            user_data['email'],
+            user_data['mobile_number'],
+            user_data['role'],
+            user_id
+        ))
+        
+        if result:
+            refresh_data('users')
+            return True, "User updated successfully"
+        else:
+            return False, "Failed to update user"
+            
+    except Exception as e:
+        return False, f"Error updating user: {e}"
+
 def generate_random_password(length=8):
     """Generate a random password"""
     import random
@@ -716,6 +748,43 @@ def add_to_database(table_name, data):
         # Generate UUID for id if not present
         if 'id' not in data:
             data['id'] = str(uuid.uuid4())
+        
+        # Check for duplicates for specific tables
+        if table_name == 'customers':
+            # Check for duplicate customers by phone or email
+            phone = data.get('phone')
+            email = data.get('email')
+            if phone or email:
+                duplicate_check_conditions = []
+                check_values = []
+                
+                if phone:
+                    duplicate_check_conditions.append("phone = %s")
+                    check_values.append(phone)
+                if email:
+                    duplicate_check_conditions.append("email = %s")
+                    check_values.append(email)
+                
+                if duplicate_check_conditions:
+                    check_query = f"SELECT id, name, phone, email FROM customers WHERE {' OR '.join(duplicate_check_conditions)}"
+                    existing_customers = execute_query(check_query, check_values, fetch=True)
+                    
+                    if existing_customers:
+                        # Return existing customer ID instead of creating duplicate
+                        existing = existing_customers[0]
+                        st.warning(f"Customer already exists: {existing['name']} (Phone: {existing['phone']}, Email: {existing['email']})")
+                        return existing['id']
+        
+        elif table_name == 'quotations':
+            # Check for duplicate quotations by quotation_number
+            quotation_number = data.get('quotation_number')
+            if quotation_number:
+                check_query = "SELECT id FROM quotations WHERE quotation_number = %s"
+                existing_quotation = execute_query(check_query, (quotation_number,), fetch=True)
+                
+                if existing_quotation:
+                    st.error(f"Quotation with number {quotation_number} already exists")
+                    return False
         
         # Convert datetime objects to strings for database
         for key, value in data.items():

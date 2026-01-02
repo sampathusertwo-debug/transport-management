@@ -49,27 +49,15 @@ def show():
     
     st.header("📦 Bookings Management")
     
-    # Initialize active tab in session state
-    if 'booking_active_tab' not in st.session_state:
-        st.session_state.booking_active_tab = "Create Booking"
+    tab1, tab2, tab3 = st.tabs(["Create Booking", "Cash Booking", "View Bookings"])
     
-    # Create tab selection
-    selected_tab = st.selectbox(
-        "Select Tab",
-        ["Create Booking", "Cash Booking", "View Bookings"],
-        index=["Create Booking", "Cash Booking", "View Bookings"].index(st.session_state.booking_active_tab) if st.session_state.booking_active_tab in ["Create Booking", "Cash Booking", "View Bookings"] else 0,
-        key="booking_tab_selector"
-    )
-    
-    # Update session state when tab changes
-    if selected_tab != st.session_state.booking_active_tab:
-        st.session_state.booking_active_tab = selected_tab
-    
-    if selected_tab == "Create Booking":
+    with tab1:
         create_booking()
-    elif selected_tab == "Cash Booking":
+    
+    with tab2:
         create_cash_booking()
-    else:
+    
+    with tab3:
         view_bookings()
 
 def create_booking():
@@ -242,48 +230,60 @@ def create_booking_from_quotation(quotation):
         
         # Save to database
         from app import save_booking
-        if save_booking(booking):
-            # Load existing bookings from database if not already loaded
-            from database import load_data_when_needed
-            load_data_when_needed('bookings')
-            
-            # Add to session state for immediate display
-            if 'bookings' not in st.session_state:
-                st.session_state.bookings = []
-            st.session_state.bookings.append(booking)
-            
-            # Track status change for new booking
-            from .notes import track_status_change
-            track_status_change(
-                record_id=booking['id'],
-                record_type='booking',
-                old_status='',
-                new_status='Created',
-                notes=f'Booking created from quotation {quotation["quotation_number"]}',
-                additional_data={
-                    'booking_number': booking['booking_number'],
-                    'quotation_number': quotation['quotation_number'],
-                    'customer_name': booking['customer_name']
-                }
-            )
-            
-            # Update quotation status
-            quotation['status'] = 'Converted to Booking'
-            
-            # Clear selected quotation
-            if 'selected_quotation_id' in st.session_state:
-                del st.session_state.selected_quotation_id
-            
-            st.success(f"Booking {booking_number} created successfully from quotation {quotation['quotation_number']}!")
-        else:
-            st.error("Failed to save booking. Please try again.")
-        
-        # Clear form
-        for key in st.session_state.keys():
-            if key.startswith('booking_'):
-                del st.session_state[key]
-        
-        st.rerun()
+        try:
+            save_result = save_booking(booking)
+            if save_result:
+                # Load existing bookings from database if not already loaded
+                from database import load_data_when_needed
+                load_data_when_needed('bookings')
+                
+                # Add to session state for immediate display
+                if 'bookings' not in st.session_state:
+                    st.session_state.bookings = []
+                st.session_state.bookings.append(booking)
+                
+                # Track status change for new booking
+                try:
+                    from .notes import track_status_change
+                    track_status_change(
+                        record_id=booking['id'],
+                        record_type='booking',
+                        old_status='',
+                        new_status='Created',
+                        notes=f'Booking created from quotation {quotation["quotation_number"]}',
+                        additional_data={
+                            'booking_number': booking['booking_number'],
+                            'quotation_number': quotation['quotation_number'],
+                            'customer_name': booking['customer_name']
+                        }
+                    )
+                except Exception as e:
+                    # Note tracking error shouldn't prevent booking creation
+                    st.warning(f"Booking created but note tracking failed: {e}")
+                
+                # Update quotation status
+                quotation['status'] = 'Converted to Booking'
+                
+                # Clear selected quotation and form data safely
+                keys_to_remove = []
+                for key in list(st.session_state.keys()):
+                    if key.startswith('booking_') or key == 'selected_quotation_id':
+                        keys_to_remove.append(key)
+                
+                for key in keys_to_remove:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                
+                st.success(f"✅ Booking {booking_number} created successfully from quotation {quotation['quotation_number']}!")
+                st.info("📋 Redirecting to View Bookings tab to see your new booking...")
+                
+                st.rerun()
+            else:
+                st.error("Failed to save booking. Please check the form data and try again.")
+                
+        except Exception as e:
+            st.error(f"An error occurred while saving the booking: {str(e)}")
+            st.error("Please try again or contact support if the problem persists.")
 
 def create_manual_booking():
     """Create booking manually without quotation"""
@@ -640,6 +640,16 @@ def view_bookings():
     """View and manage existing bookings"""
     st.subheader("View Bookings")
     
+    # Remove duplicate bookings based on ID
+    if st.session_state.bookings:
+        seen_ids = set()
+        unique_bookings = []
+        for booking in st.session_state.bookings:
+            if booking['id'] not in seen_ids:
+                unique_bookings.append(booking)
+                seen_ids.add(booking['id'])
+        st.session_state.bookings = unique_bookings
+    
     if not st.session_state.bookings:
         st.info("No bookings found. Create your first booking in the 'Create Booking' tab.")
         return
@@ -728,98 +738,160 @@ def view_bookings():
                 if booking.get('cargo_details'):
                     st.write(f"**Cargo:** {booking['cargo_details']}")
             
-            # Action buttons
+            # Action buttons - Status-based workflow control
             st.markdown("**Actions:**")
-            action_col1, action_col2, action_col3, action_col4 = st.columns(4)
             
-            with action_col1:
-                if can_edit_booking(booking) and st.button(f"Edit", key=f"edit_{booking['id']}"):
-                    st.session_state[f"edit_booking_{booking['id']}"] = True
-                    st.rerun()
+            if booking['status'] == 'POD Generated':
+                # After POD generation, only allow viewing POD and invoice creation
+                action_col1, action_col2 = st.columns(2)
+                
+                with action_col1:
+                    st.success("📄 POD Generated - Booking Complete")
+                    if st.button(f"📄 View POD", key=f"view_pod_{booking['id']}"):
+                        st.info("POD viewing feature can be implemented here")
+                
+                with action_col2:
+                    # Check if invoice exists for this booking
+                    invoice_exists = any(inv.get('booking_id') == booking['id'] for inv in st.session_state.invoices)
+                    if not invoice_exists:
+                        if st.button(f"📊 Create Invoice", key=f"create_invoice_{booking['id']}", type="primary"):
+                            st.session_state.selected_booking_id = booking['id']
+                            st.success("Navigate to Invoice Generation tab to create invoice for this booking!")
+                    else:
+                        st.info("✅ Invoice already created")
             
-            with action_col2:
-                if booking['status'] != 'Confirmed' and booking['status'] != 'Dispatched' and st.button(f"Confirm", key=f"confirm_{booking['id']}"):
-                    # Keep on View Bookings tab
-                    st.session_state.booking_active_tab = "View Bookings"
-                    # Find and update the actual booking in session state
-                    for i, b in enumerate(st.session_state.bookings):
-                        if b['id'] == booking['id']:
-                            st.session_state.bookings[i]['status'] = 'Confirmed'
-                            booking['status'] = 'Confirmed'  # Update local reference too
-                            # Update in database (don't insert new record)
-                            from database import update_in_database
-                            update_in_database('bookings', {'status': 'Confirmed'}, booking['id'])
-                            break
-                    st.success(f"Booking {booking['booking_number']} confirmed!")
-                    st.rerun()
+            elif booking['status'] in ['Cancelled']:
+                # Cancelled bookings - no actions available
+                st.error("❌ Booking Cancelled - No actions available")
             
-            with action_col3:
-                if booking['status'] in ['Confirmed', 'Created'] and st.button(f"Dispatch", key=f"dispatch_{booking['id']}"):
-                    # Keep on View Bookings tab
-                    st.session_state.booking_active_tab = "View Bookings"
-                    # Find and update the actual booking in session state
-                    old_status = booking['status']
-                    for i, b in enumerate(st.session_state.bookings):
-                        if b['id'] == booking['id']:
-                            st.session_state.bookings[i]['status'] = 'Dispatched'
-                            st.session_state.bookings[i]['can_edit'] = False  # Lock editing after dispatch
-                            booking['status'] = 'Dispatched'  # Update local reference too
-                            booking['can_edit'] = False
-                            # Track status change
-                            from .notes import track_status_change
-                            track_status_change(
-                                record_id=booking['id'],
-                                record_type='booking',
-                                old_status=old_status,
-                                new_status='Dispatched',
-                                notes='Booking dispatched to driver',
-                                additional_data={'booking_number': booking['booking_number']}
-                            )
-                            # Update in database (don't insert new record)
-                            from database import update_in_database
-                            update_in_database('bookings', {'status': 'Dispatched', 'can_edit': False}, booking['id'])
-                            break
-                    st.success(f"Booking {booking['booking_number']} dispatched!")
-                    st.rerun()
-            
-            with action_col4:
-                if booking['status'] == 'Dispatched' and st.button(f"Generate POD", key=f"pod_{booking['id']}"):
-                    # Keep on View Bookings tab
-                    st.session_state.booking_active_tab = "View Bookings"
-                    # Find and update the actual booking in session state
-                    for i, b in enumerate(st.session_state.bookings):
-                        if b['id'] == booking['id']:
-                            st.session_state.bookings[i]['status'] = 'POD Generated'
-                            st.session_state.bookings[i]['pod_date'] = datetime.datetime.now()
-                            booking['status'] = 'POD Generated'  # Update local reference too
-                            booking['pod_date'] = datetime.datetime.now()
-                            # Track status change
-                            from .notes import track_status_change
-                            track_status_change(
-                                record_id=booking['id'],
-                                record_type='booking',
-                                old_status='Dispatched',
-                                new_status='POD Generated',
-                                notes='Proof of delivery generated',
-                                additional_data={
-                                    'booking_number': booking['booking_number'],
+            else:
+                # Normal workflow for active bookings
+                action_col1, action_col2, action_col3, action_col4 = st.columns(4)
+                
+                with action_col1:
+                    # Edit button - only for editable statuses
+                    if can_edit_booking(booking) and st.button(f"✏️ Edit", key=f"edit_booking_{booking['id']}"):
+                        st.session_state[f"edit_booking_{booking['id']}"] = True
+                        st.rerun()
+                
+                with action_col2:
+                    # Confirm button - only for Created status
+                    if booking['status'] == 'Created' and st.button(f"✅ Confirm", key=f"confirm_{booking['id']}", type="primary"):
+                        # Find and update the actual booking in session state
+                        old_status = booking['status']
+                        for i, b in enumerate(st.session_state.bookings):
+                            if b['id'] == booking['id']:
+                                st.session_state.bookings[i]['status'] = 'Confirmed'
+                                booking['status'] = 'Confirmed'  # Update local reference too
+                                # Track status change
+                                from .notes import track_status_change
+                                track_status_change(
+                                    record_id=booking['id'],
+                                    record_type='booking',
+                                    old_status=old_status,
+                                    new_status='Confirmed',
+                                    notes=f'Booking {booking["booking_number"]} confirmed by user',
+                                    additional_data={'booking_number': booking['booking_number']}
+                                )
+                                # Update in database
+                                from database import update_in_database
+                                update_in_database('bookings', {'status': 'Confirmed'}, booking['id'])
+                                break
+                        st.success(f"✅ Booking {booking['booking_number']} confirmed!")
+                        st.rerun()
+                
+                with action_col3:
+                    # Dispatch button - only for Confirmed and Created status
+                    if booking['status'] in ['Confirmed', 'Created'] and st.button(f"🚚 Dispatch", key=f"dispatch_{booking['id']}"):
+                        # Find and update the actual booking in session state
+                        old_status = booking['status']
+                        for i, b in enumerate(st.session_state.bookings):
+                            if b['id'] == booking['id']:
+                                st.session_state.bookings[i]['status'] = 'Dispatched'
+                                st.session_state.bookings[i]['can_edit'] = False  # Lock editing after dispatch
+                                booking['status'] = 'Dispatched'  # Update local reference too
+                                booking['can_edit'] = False
+                                # Track status change
+                                from .notes import track_status_change
+                                track_status_change(
+                                    record_id=booking['id'],
+                                    record_type='booking',
+                                    old_status=old_status,
+                                    new_status='Dispatched',
+                                    notes='Booking dispatched to driver',
+                                    additional_data={'booking_number': booking['booking_number']}
+                                )
+                                # Update in database
+                                from database import update_in_database
+                                update_in_database('bookings', {'status': 'Dispatched', 'can_edit': False}, booking['id'])
+                                break
+                        st.success(f"🚚 Booking {booking['booking_number']} dispatched!")
+                        st.rerun()
+                
+                with action_col4:
+                    # Generate POD button - only for Dispatched status
+                    if booking['status'] == 'Dispatched' and st.button(f"📄 Generate POD", key=f"pod_{booking['id']}", type="primary"):
+                        # Find and update the actual booking in session state
+                        old_status = booking['status']
+                        for i, b in enumerate(st.session_state.bookings):
+                            if b['id'] == booking['id']:
+                                st.session_state.bookings[i]['status'] = 'POD Generated'
+                                st.session_state.bookings[i]['pod_date'] = datetime.datetime.now()
+                                booking['status'] = 'POD Generated'  # Update local reference too
+                                booking['pod_date'] = datetime.datetime.now()
+                                # Track status change
+                                from .notes import track_status_change
+                                track_status_change(
+                                    record_id=booking['id'],
+                                    record_type='booking',
+                                    old_status=old_status,
+                                    new_status='POD Generated',
+                                    notes='Proof of delivery generated - booking workflow complete',
+                                    additional_data={
+                                        'booking_number': booking['booking_number'],
+                                        'pod_date': datetime.datetime.now().isoformat()
+                                    }
+                                )
+                                # Update in database
+                                from database import update_in_database
+                                update_in_database('bookings', {
+                                    'status': 'POD Generated',
                                     'pod_date': datetime.datetime.now().isoformat()
-                                }
-                            )
-                            # Update in database (don't insert new record)
-                            from database import update_in_database
-                            update_in_database('bookings', {
-                                'status': 'POD Generated',
-                                'pod_date': datetime.datetime.now().isoformat()
-                            }, booking['id'])
-                            break
-                    st.success(f"POD generated for booking {booking['booking_number']}!")
-                    st.rerun()
+                                }, booking['id'])
+                                break
+                        st.success(f"📄 POD generated for booking {booking['booking_number']}! Booking is now complete.")
+                        st.rerun()
+                
+                # Cancel booking option - only for non-final statuses
+                if booking['status'] not in ['POD Generated', 'Cancelled', 'Delivered']:
+                    if st.button(f"❌ Cancel Booking", key=f"cancel_{booking['id']}", help="Cancel this booking"):
+                        # Find and update the actual booking in session state
+                        old_status = booking['status']
+                        for i, b in enumerate(st.session_state.bookings):
+                            if b['id'] == booking['id']:
+                                st.session_state.bookings[i]['status'] = 'Cancelled'
+                                booking['status'] = 'Cancelled'
+                                # Track status change
+                                from .notes import track_status_change
+                                track_status_change(
+                                    record_id=booking['id'],
+                                    record_type='booking',
+                                    old_status=old_status,
+                                    new_status='Cancelled',
+                                    notes=f'Booking {booking["booking_number"]} cancelled by user',
+                                    additional_data={'booking_number': booking['booking_number']}
+                                )
+                                # Update in database
+                                from database import update_in_database
+                                update_in_database('bookings', {'status': 'Cancelled'}, booking['id'])
+                                break
+                        st.error("❌ Booking cancelled!")
+                        st.rerun()
             
             # Edit form
             if st.session_state.get(f"edit_booking_{booking['id']}", False):
                 st.markdown("---")
-                st.markdown("**Edit Booking:**")
+                st.markdown("### ✏️ Edit Booking Details")
                 
                 if not can_edit_booking(booking):
                     st.error("This booking cannot be edited as it has been dispatched or POD has been generated.")
@@ -827,36 +899,161 @@ def view_bookings():
                         del st.session_state[f"edit_booking_{booking['id']}"]
                         st.rerun()
                 else:
-                    # Edit form (simplified for now - can be expanded)
+                    # Full edit form with all booking fields
+                    st.markdown("**Customer & Route Information**")
                     edit_col1, edit_col2 = st.columns(2)
                     
                     with edit_col1:
+                        new_pickup_location = st.text_input("Pickup Location", value=booking.get('pickup_location', ''), key=f"edit_pickup_loc_{booking['id']}")
                         new_pickup_date = st.date_input("Pickup Date", value=booking['pickup_date'], key=f"edit_pickup_{booking['id']}")
-                        new_delivery_date = st.date_input("Delivery Date", value=booking['delivery_date'], key=f"edit_delivery_{booking['id']}")
-                        new_cargo = st.text_input("Cargo Details", value=booking.get('cargo_details', ''), key=f"edit_cargo_{booking['id']}")
-                    
+                        new_pickup_contact = st.text_input("Pickup Contact", value=booking.get('pickup_contact', ''), key=f"edit_pickup_contact_{booking['id']}")
+                        new_pickup_phone = st.text_input("Pickup Phone", value=booking.get('pickup_phone', ''), key=f"edit_pickup_phone_{booking['id']}")
+                        
                     with edit_col2:
-                        new_instructions = st.text_area("Special Instructions", value=booking.get('special_instructions', ''), key=f"edit_instructions_{booking['id']}")
-                        new_advance = st.number_input("Advance Payment", value=float(booking.get('advance_payment', 0)), key=f"edit_advance_{booking['id']}")
+                        new_delivery_location = st.text_input("Delivery Location", value=booking.get('delivery_location', ''), key=f"edit_delivery_loc_{booking['id']}")
+                        new_delivery_date = st.date_input("Delivery Date", value=booking['delivery_date'], key=f"edit_delivery_{booking['id']}")
+                        new_delivery_contact = st.text_input("Delivery Contact", value=booking.get('delivery_contact', ''), key=f"edit_delivery_contact_{booking['id']}")
+                        new_delivery_phone = st.text_input("Delivery Phone", value=booking.get('delivery_phone', ''), key=f"edit_delivery_phone_{booking['id']}")
                     
+                    st.markdown("**Vehicle & Cargo Information**")
+                    vehicle_col1, vehicle_col2, vehicle_col3 = st.columns(3)
+                    
+                    with vehicle_col1:
+                        new_vehicle_type = st.selectbox("Vehicle Type", 
+                            ["Tata Ace - 7ft", "Bolero / Dost - 8ft", "12 ft", "14 ft", "17 ft", "20 ft", "24 ft", "32 ft"],
+                            index=["Tata Ace - 7ft", "Bolero / Dost - 8ft", "12 ft", "14 ft", "17 ft", "20 ft", "24 ft", "32 ft"].index(booking.get('vehicle_type', 'Tata Ace - 7ft')) if booking.get('vehicle_type') in ["Tata Ace - 7ft", "Bolero / Dost - 8ft", "12 ft", "14 ft", "17 ft", "20 ft", "24 ft", "32 ft"] else 0,
+                            key=f"edit_vehicle_type_{booking['id']}")
+                        new_assigned_vehicle = st.text_input("Assigned Vehicle", value=booking.get('assigned_vehicle', ''), key=f"edit_assigned_vehicle_{booking['id']}")
+                        
+                    with vehicle_col2:
+                        new_assigned_driver = st.text_input("Assigned Driver", value=booking.get('assigned_driver', ''), key=f"edit_assigned_driver_{booking['id']}")
+                        new_priority = st.selectbox("Priority", ["Normal", "High", "Urgent"],
+                            index=["Normal", "High", "Urgent"].index(booking.get('priority', 'Normal')) if booking.get('priority') in ["Normal", "High", "Urgent"] else 0,
+                            key=f"edit_priority_{booking['id']}")
+                    
+                    with vehicle_col3:
+                        weight_col1, weight_col2 = st.columns([2, 1])
+                        with weight_col1:
+                            new_weight_capacity = st.number_input("Weight Capacity", min_value=0.0, value=float(booking.get('weight_capacity', 0)), key=f"edit_weight_{booking['id']}")
+                        with weight_col2:
+                            new_weight_unit = st.selectbox("Unit", ["kg", "tons"],
+                                index=["kg", "tons"].index(booking.get('weight_unit', 'kg')) if booking.get('weight_unit') in ["kg", "tons"] else 0,
+                                key=f"edit_weight_unit_{booking['id']}")
+                        new_distance_km = st.number_input("Distance (KM)", min_value=0.0, value=float(booking.get('distance_km', 0)), key=f"edit_distance_{booking['id']}")
+                    
+                    st.markdown("**Cargo & Special Information**")
+                    cargo_col1, cargo_col2 = st.columns(2)
+                    
+                    with cargo_col1:
+                        new_cargo = st.text_area("Cargo Details", value=booking.get('cargo_details', ''), key=f"edit_cargo_{booking['id']}")
+                    with cargo_col2:
+                        new_instructions = st.text_area("Special Instructions", value=booking.get('special_instructions', ''), key=f"edit_instructions_{booking['id']}")
+                    
+                    st.markdown("**Financial Information**")
+                    finance_col1, finance_col2, finance_col3 = st.columns(3)
+                    
+                    with finance_col1:
+                        new_base_amount = st.number_input("Base Amount (₹)", min_value=0.0, value=float(booking.get('base_amount', 0)), key=f"edit_base_amount_{booking['id']}")
+                        new_loading_charges = st.number_input("Loading Charges (₹)", min_value=0.0, value=float(booking.get('loading_charges', 0)), key=f"edit_loading_{booking['id']}")
+                        new_unloading_charges = st.number_input("Unloading Charges (₹)", min_value=0.0, value=float(booking.get('unloading_charges', 0)), key=f"edit_unloading_{booking['id']}")
+                    
+                    with finance_col2:
+                        new_fuel_charges = st.number_input("Fuel Charges (₹)", min_value=0.0, value=float(booking.get('fuel_charges', 0)), key=f"edit_fuel_{booking['id']}")
+                        new_toll_charges = st.number_input("Toll Charges (₹)", min_value=0.0, value=float(booking.get('toll_charges', 0)), key=f"edit_toll_{booking['id']}")
+                        new_other_charges = st.number_input("Other Charges (₹)", min_value=0.0, value=float(booking.get('other_charges', 0)), key=f"edit_other_{booking['id']}")
+                    
+                    with finance_col3:
+                        new_discount = st.number_input("Discount (₹)", min_value=0.0, value=float(booking.get('discount', 0)), key=f"edit_discount_{booking['id']}")
+                        new_advance = st.number_input("Advance Payment (₹)", min_value=0.0, value=float(booking.get('advance_payment', 0)), key=f"edit_advance_{booking['id']}")
+                        new_gst_applicable = st.checkbox("GST Applicable", value=booking.get('gst_applicable', True), key=f"edit_gst_{booking['id']}")
+                    
+                    # Calculate totals
+                    subtotal = new_base_amount + new_loading_charges + new_unloading_charges + new_fuel_charges + new_toll_charges + new_other_charges - new_discount
+                    gst_amount = subtotal * 0.18 if new_gst_applicable else 0
+                    new_total_amount = subtotal + gst_amount
+                    balance_amount = new_total_amount - new_advance
+                    
+                    # Display calculated totals
+                    total_col1, total_col2, total_col3 = st.columns(3)
+                    with total_col1:
+                        st.metric("Subtotal", f"₹{subtotal:,.2f}")
+                    with total_col2:
+                        st.metric("GST Amount", f"₹{gst_amount:,.2f}")
+                    with total_col3:
+                        st.metric("Total Amount", f"₹{new_total_amount:,.2f}")
+                    
+                    st.metric("Balance Amount", f"₹{balance_amount:,.2f}")
+                    
+                    # Action buttons
                     edit_action_col1, edit_action_col2 = st.columns(2)
                     
                     with edit_action_col1:
-                        if st.button(f"Save Changes", key=f"save_{booking['id']}", type="primary"):
-                            booking['pickup_date'] = new_pickup_date
-                            booking['delivery_date'] = new_delivery_date
-                            booking['cargo_details'] = new_cargo
-                            booking['special_instructions'] = new_instructions
-                            booking['advance_payment'] = new_advance
-                            booking['balance_amount'] = booking['total_amount'] - new_advance
-                            booking['last_modified'] = datetime.datetime.now()
+                        if st.button(f"💾 Save All Changes", key=f"save_{booking['id']}", type="primary"):
+                            # Update all booking fields
+                            updated_booking = {
+                                'pickup_location': new_pickup_location,
+                                'delivery_location': new_delivery_location,
+                                'pickup_date': new_pickup_date,
+                                'delivery_date': new_delivery_date,
+                                'pickup_contact': new_pickup_contact,
+                                'pickup_phone': new_pickup_phone,
+                                'delivery_contact': new_delivery_contact,
+                                'delivery_phone': new_delivery_phone,
+                                'vehicle_type': new_vehicle_type,
+                                'assigned_vehicle': new_assigned_vehicle,
+                                'assigned_driver': new_assigned_driver,
+                                'priority': new_priority,
+                                'weight_capacity': new_weight_capacity,
+                                'weight_unit': new_weight_unit,
+                                'distance_km': new_distance_km,
+                                'cargo_details': new_cargo,
+                                'special_instructions': new_instructions,
+                                'base_amount': new_base_amount,
+                                'loading_charges': new_loading_charges,
+                                'unloading_charges': new_unloading_charges,
+                                'fuel_charges': new_fuel_charges,
+                                'toll_charges': new_toll_charges,
+                                'other_charges': new_other_charges,
+                                'discount': new_discount,
+                                'advance_payment': new_advance,
+                                'gst_applicable': new_gst_applicable,
+                                'gst_amount': gst_amount,
+                                'total_amount': new_total_amount,
+                                'balance_amount': balance_amount,
+                                'last_modified': datetime.datetime.now()
+                            }
                             
-                            del st.session_state[f"edit_booking_{booking['id']}"]
-                            st.success(f"Booking {booking['booking_number']} updated successfully!")
-                            st.rerun()
+                            # Update in database
+                            from database import update_in_database
+                            if update_in_database('bookings', updated_booking, booking['id']):
+                                # Update local session state
+                                booking.update(updated_booking)
+                                
+                                # Track status change
+                                try:
+                                    from .notes import track_status_change
+                                    track_status_change(
+                                        record_id=booking['id'],
+                                        record_type='booking',
+                                        old_status=booking['status'],
+                                        new_status=booking['status'],
+                                        notes=f'Booking {booking["booking_number"]} details updated',
+                                        additional_data={
+                                            'booking_number': booking['booking_number'],
+                                            'updated_fields': list(updated_booking.keys())
+                                        }
+                                    )
+                                except Exception as e:
+                                    st.warning(f"Booking updated but note tracking failed: {e}")
+                                
+                                del st.session_state[f"edit_booking_{booking['id']}"]
+                                st.success(f"✅ Booking {booking['booking_number']} updated successfully!")
+                                st.rerun()
+                            else:
+                                st.error("Failed to update booking. Please try again.")
                     
                     with edit_action_col2:
-                        if st.button(f"Cancel", key=f"cancel_edit_{booking['id']}"):
+                        if st.button(f"❌ Cancel Edit", key=f"cancel_edit_{booking['id']}"):
                             del st.session_state[f"edit_booking_{booking['id']}"]
                             st.rerun()
             
@@ -868,9 +1065,7 @@ def view_bookings():
             
             # Cancel booking
             if booking['status'] not in ['Delivered', 'POD Captured', 'Cancelled']:
-                if st.button(f"Cancel Booking", key=f"cancel_{booking['id']}"):
-                    # Keep on View Bookings tab
-                    st.session_state.booking_active_tab = "View Bookings"
+                if st.button(f"Cancel Booking", key=f"cancel_booking_{booking['id']}"):
                     # Find and update the actual booking in session state
                     old_status = booking['status']
                     for i, b in enumerate(st.session_state.bookings):
@@ -1069,28 +1264,58 @@ def create_cash_booking():
         
         # Save booking
         from app import save_booking
-        if save_booking(cash_booking):
-            # Add to session state for immediate display
-            if 'bookings' not in st.session_state:
-                st.session_state.bookings = []
-            st.session_state.bookings.append(cash_booking)
-            
-            st.success(f"✅ Cash Booking {booking_number} created successfully!")
-            
-            # Show booking summary
-            st.info(f"📋 **Booking Summary:**\n"
-                   f"- Booking Number: {booking_number}\n"
-                   f"- Customer: {customer_name} ({customer_phone})\n"
-                   f"- Route: {pickup_location} → {delivery_location}\n"
-                   f"- Vehicle: {vehicle_type}\n"
-                   f"- Amount: ₹{cash_amount:,.2f}\n"
-                   f"- Status: {'Confirmed' if advance_received > 0 else 'Created'}")
-            
-            # Clear form fields
-            for key in st.session_state.keys():
-                if key.startswith('cash_'):
-                    del st.session_state[key]
-            
-            st.rerun()
-        else:
-            st.error("Failed to save booking. Please try again.")
+        try:
+            save_result = save_booking(cash_booking)
+            if save_result:
+                # Add to session state for immediate display
+                if 'bookings' not in st.session_state:
+                    st.session_state.bookings = []
+                st.session_state.bookings.append(cash_booking)
+                
+                # Track status change for new booking
+                try:
+                    from .notes import track_status_change
+                    track_status_change(
+                        record_id=cash_booking['id'],
+                        record_type='booking',
+                        old_status='',
+                        new_status='Created',
+                        notes=f'Cash booking created: {booking_number}',
+                        additional_data={
+                            'booking_number': booking_number,
+                            'customer_name': cash_booking['customer_name'],
+                            'payment_mode': 'Cash'
+                        }
+                    )
+                except Exception as e:
+                    # Note tracking error shouldn't prevent booking creation
+                    st.warning(f"Booking created but note tracking failed: {e}")
+                
+                st.success(f"✅ Cash Booking {booking_number} created successfully!")
+                
+                # Show booking summary
+                st.info(f"📋 **Booking Summary:**\n"
+                       f"- Booking Number: {booking_number}\n"
+                       f"- Customer: {customer_name} ({customer_phone})\n"
+                       f"- Route: {pickup_location} → {delivery_location}\n"
+                       f"- Vehicle: {vehicle_type}\n"
+                       f"- Amount: ₹{cash_amount:,.2f}\n"
+                       f"- Status: {'Confirmed' if advance_received > 0 else 'Created'}")
+                
+                # Clear form fields safely
+                keys_to_remove = []
+                for key in list(st.session_state.keys()):
+                    if key.startswith('cash_'):
+                        keys_to_remove.append(key)
+                
+                for key in keys_to_remove:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                
+                st.rerun()
+            else:
+                st.error("Failed to save booking. Please check the form data and try again.")
+                
+        except Exception as e:
+            st.error(f"An error occurred while saving the booking: {str(e)}")
+            st.error("Please try again or contact support if the problem persists.")

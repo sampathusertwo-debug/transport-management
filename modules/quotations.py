@@ -288,59 +288,85 @@ def create_quotation():
     # Notes and terms
     special_instructions = st.text_area("Special Instructions", key="quotation_instructions")
     
-    # Submit button
-    if st.button("Create Quotation", type="primary"):
+    # Submit button - prevent duplicate submissions with disabled state
+    submit_disabled = st.session_state.get('quotation_submitting', False)
+    
+    if st.button("Create Quotation", type="primary", disabled=submit_disabled):
+        # Set submitting flag to prevent duplicate submissions
+        st.session_state.quotation_submitting = True
+        
         # Validation
         if customer_choice == "New Customer":
             if not customer_name or not customer_phone:
                 st.error("Customer name and phone are required")
+                st.session_state.quotation_submitting = False
+                return
+                
+            # Validate mobile number for new customer
+            if not validate_mobile_number(customer_phone):
+                st.error("Please enter a valid mobile number")
+                st.session_state.quotation_submitting = False
                 return
         
         if not pickup_location or not delivery_location or base_price <= 0:
             st.error("Pickup location, delivery location, and base price are required")
+            st.session_state.quotation_submitting = False
             return
         
         # Create new customer if needed
         if customer_choice == "New Customer":
-            customer_id = str(uuid.uuid4())
-            new_customer = {
-                'id': customer_id,
-                'name': customer_name,
-                'email': customer_email,
-                'phone': customer_phone,
-                'address': customer_address,
-                'gst_number': customer_gst,
-                'pan_number': customer_pan,
-                'payment_terms': payment_terms,
-                'created_date': datetime.datetime.now()
-            }
-            # Save customer to database
-            from app import save_customer
-            if save_customer(new_customer):
-                # Reload all customers from database to get latest data
-                from database import get_cached_data
-                st.session_state.customers = get_cached_data('customers')
+            # Check for existing customer with same phone/email to prevent duplicates
+            existing_customer = None
+            for existing in st.session_state.customers:
+                if (customer_phone and existing.get('phone') == customer_phone) or \
+                   (customer_email and existing.get('email') and existing.get('email').lower() == customer_email.lower()):
+                    existing_customer = existing
+                    break
+            
+            if existing_customer:
+                st.warning(f"Customer already exists with this phone/email. Using existing customer: {existing_customer['name']}")
+                customer_id = existing_customer['id']
             else:
-                st.error("Failed to save customer. Using local storage.")
+                new_customer = {
+                    'id': str(uuid.uuid4()),
+                    'name': customer_name,
+                    'email': customer_email,
+                    'phone': customer_phone,
+                    'address': customer_address,
+                    'gst_number': customer_gst,
+                    'pan_number': customer_pan,
+                    'payment_terms': payment_terms,
+                    'created_date': datetime.datetime.now()
+                }
+                # Save customer to database
+                from app import save_customer
+                save_result = save_customer(new_customer)
+                if save_result:
+                    # save_customer might return an existing customer ID
+                    customer_id = save_result if isinstance(save_result, str) else new_customer['id']
+                    # Reload all customers from database to get latest data
+                    from database import get_cached_data
+                    st.session_state.customers = get_cached_data('customers')
+                else:
+                    st.error("Failed to save customer. Please try again.")
+                    st.session_state.quotation_submitting = False
+                    return
         else:
             customer_data = next((c for c in st.session_state.customers if c['name'] == customer_choice), None)
-            customer_id = customer_data['id']
-            # Update payment terms for existing customer
-            customer_data['payment_terms'] = payment_terms
+            customer_id = customer_data['id'] if customer_data else None
+            if not customer_id:
+                st.error("Selected customer not found")
+                st.session_state.quotation_submitting = False
+                return
         
         # Generate quotation number
         from app import generate_quotation_number
         quotation_number = generate_quotation_number()
         
-        # Validate mobile number for new customer
-        if customer_choice == "New Customer":
-            if not validate_mobile_number(customer_phone):
-                st.error("Please enter a valid mobile number")
-                return
-        
-        # Create quotation
+        # Create quotation with unique ID and proper idempotency
+        quotation_id = str(uuid.uuid4())
         quotation = {
-            'id': str(uuid.uuid4()),
+            'id': quotation_id,
             'quotation_number': quotation_number,
             'customer_id': customer_id,
             'customer_name': customer_name if customer_choice == "New Customer" else customer_choice,
@@ -379,9 +405,7 @@ def create_quotation():
             from database import get_cached_data
             st.session_state.quotations = get_cached_data('quotations', limit=100)
             
-            st.success(f"Quotation {quotation_number} created successfully!")
-            
-            # Clear form by removing all quotation and customer form keys
+            # Clear form completely by removing all quotation and customer form keys
             keys_to_remove = []
             for key in st.session_state.keys():
                 if key.startswith('quotation_') or key.startswith('new_customer_'):
@@ -389,10 +413,18 @@ def create_quotation():
             
             for key in keys_to_remove:
                 del st.session_state[key]
+                
+            # Reset submitting flag
+            st.session_state.quotation_submitting = False
+            
+            # Show success and redirect to view quotations
+            st.success(f"✅ Quotation {quotation_number} created successfully!")
+            st.info("📋 Form has been cleared. You can create a new quotation or switch to 'View Quotations' tab to see the created quotation.")
             
             st.rerun()
         else:
-            st.error("Failed to save quotation. Using local storage.")
+            st.error("Failed to save quotation. Please try again.")
+            st.session_state.quotation_submitting = False
 
 def view_quotations():
     """View and manage existing quotations"""
@@ -462,19 +494,31 @@ def view_quotations():
                 st.write(f"**GST:** {'Yes' if quotation['gst_applicable'] else 'No'}")
             
             # Action buttons - adjust based on quotation status
-            if quotation['status'] == 'Draft':
+            if quotation['status'] in ['Draft', 'Sent']:
                 col1, col2, col3, col4, col5 = st.columns(5)
                 
                 with col1:
-                    if st.button(f"Send", key=f"send_{quotation['id']}"):
+                    if st.button(f"✏️ Edit/Revise", key=f"edit_{quotation['id']}"):
+                        st.session_state.editing_quotation_id = quotation['id']
+                        st.rerun()
+                
+                with col2:
+                    if quotation['status'] == 'Draft' and st.button(f"📤 Send", key=f"send_{quotation['id']}"):
                         if update_quotation_status(quotation['id'], 'Sent'):
                             st.success("Quotation sent to customer!")
                             st.rerun()
                         else:
                             st.error("Failed to mark quotation as sent. Please try again.")
                 
-                with col2:
-                    if st.button(f"Delete", key=f"delete_{quotation['id']}"):
+                with col3:
+                    if quotation['status'] == 'Sent' and st.button(f"✅ Approve", key=f"approve_{quotation['id']}"):
+                        if update_quotation_status(quotation['id'], 'Approved'):
+                            st.success("Quotation approved successfully!")
+                            st.rerun()
+                        else:
+                            st.error("Failed to approve quotation. Please try again.")
+                    
+                    elif quotation['status'] == 'Draft' and st.button(f"🗑️ Delete", key=f"delete_{quotation['id']}"):
                         # Add deletion note before deleting
                         from .notes import add_status_note
                         add_status_note(
@@ -504,49 +548,17 @@ def view_quotations():
                         except Exception as e:
                             st.error(f"Error deleting quotation: {str(e)}")
                 
-                with col3:
-                    # PDF Generation Button
-                    if st.button(f"Download PDF", key=f"pdf_{quotation['id']}"):
-                        try:
-                            pdf_data = generate_quotation_pdf(quotation)
-                            # Use a different approach to download PDF
-                            st.session_state[f'pdf_data_{quotation["id"]}'] = pdf_data
-                            st.success("PDF generated! Click button below to download.")
-                        except Exception as e:
-                            st.error(f"Error generating PDF: {str(e)}")
-                    
-                    # Show download button if PDF data exists
-                    if f'pdf_data_{quotation["id"]}' in st.session_state:
-                        st.download_button(
-                            label="📄 Download PDF",
-                            data=st.session_state[f'pdf_data_{quotation["id"]}'],
-                            file_name=f"Quotation_{quotation['quotation_number']}.pdf",
-                            mime="application/pdf",
-                            key=f"download_pdf_btn_{quotation['id']}"
-                        )
-                        
-            elif quotation['status'] == 'Sent':
-                col1, col2, col3, col4, col5 = st.columns(5)
-                
-                with col1:
-                    if st.button(f"Approve", key=f"approve_{quotation['id']}"):
-                        if update_quotation_status(quotation['id'], 'Approved'):
-                            st.success("Quotation approved successfully!")
-                            st.rerun()
-                        else:
-                            st.error("Failed to approve quotation. Please try again.")
-                
-                with col2:
-                    if st.button(f"Reject", key=f"reject_{quotation['id']}"):
+                with col4:
+                    if quotation['status'] == 'Sent' and st.button(f"❌ Reject", key=f"reject_{quotation['id']}"):
                         if update_quotation_status(quotation['id'], 'Rejected'):
                             st.warning("Quotation rejected.")
                             st.rerun()
                         else:
                             st.error("Failed to reject quotation. Please try again.")
                 
-                with col3:
+                with col5:
                     # PDF Generation Button
-                    if st.button(f"Download PDF", key=f"pdf_{quotation['id']}"):
+                    if st.button(f"📄 PDF", key=f"pdf_{quotation['id']}"):
                         try:
                             pdf_data = generate_quotation_pdf(quotation)
                             # Use a different approach to download PDF
@@ -558,14 +570,47 @@ def view_quotations():
                     # Show download button if PDF data exists
                     if f'pdf_data_{quotation["id"]}' in st.session_state:
                         st.download_button(
-                            label="📄 Download PDF",
+                            label="⬇️ Download",
                             data=st.session_state[f'pdf_data_{quotation["id"]}'],
                             file_name=f"Quotation_{quotation['quotation_number']}.pdf",
                             mime="application/pdf",
                             key=f"download_pdf_btn_{quotation['id']}"
                         )
                         
-            else:  # Approved, Rejected, or Expired quotations
+            elif quotation['status'] == 'Approved':
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    if st.button(f"📦 Create Booking", key=f"booking_{quotation['id']}"):
+                        st.session_state.selected_quotation_id = quotation['id']
+                        st.success("Navigate to Bookings tab to create booking from this quotation!")
+                
+                with col2:
+                    if st.button(f"✏️ Revise", key=f"revise_{quotation['id']}", help="Create a revised version of this quotation"):
+                        st.session_state.editing_quotation_id = quotation['id']
+                        st.session_state.revise_mode = True
+                        st.rerun()
+                
+                with col3:
+                    # PDF Generation Button
+                    if st.button(f"📄 PDF", key=f"pdf_{quotation['id']}"):
+                        try:
+                            pdf_data = generate_quotation_pdf(quotation)
+                            st.session_state[f'pdf_data_{quotation["id"]}'] = pdf_data
+                            st.success("PDF generated! Click button below to download.")
+                        except Exception as e:
+                            st.error(f"Error generating PDF: {str(e)}")
+                    
+                    if f'pdf_data_{quotation["id"]}' in st.session_state:
+                        st.download_button(
+                            label="⬇️ Download",
+                            data=st.session_state[f'pdf_data_{quotation["id"]}'],
+                            file_name=f"Quotation_{quotation['quotation_number']}.pdf",
+                            mime="application/pdf",
+                            key=f"download_pdf_btn_{quotation['id']}"
+                        )
+                        
+            else:  # Rejected or Expired quotations
                 col1, col2, col3, col4, col5 = st.columns(5)
                 
                 with col1:
@@ -650,6 +695,290 @@ def view_quotations():
             file_name=f"quotations_{datetime.datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv"
         )
+    
+    # Handle quotation editing if requested
+    if 'editing_quotation_id' in st.session_state:
+        quotation_to_edit = next((q for q in st.session_state.quotations if q['id'] == st.session_state.editing_quotation_id), None)
+        if quotation_to_edit:
+            edit_quotation(quotation_to_edit)
+
+def edit_quotation(quotation):
+    """Edit an existing quotation or create a revised version"""
+    st.markdown("---")
+    
+    revise_mode = st.session_state.get('revise_mode', False)
+    if revise_mode:
+        st.subheader(f"🔄 Create Revised Quotation from {quotation['quotation_number']}")
+        st.info("This will create a new quotation based on the current one with your modifications.")
+    else:
+        st.subheader(f"✏️ Edit Quotation {quotation['quotation_number']}")
+        st.info("Modifications will update the existing quotation.")
+    
+    # Load customers to ensure we have latest data
+    from database import get_cached_data
+    st.session_state.customers = get_cached_data('customers')
+    
+    # Customer information (read-only display for editing, editable for revision)
+    customer_data = next((c for c in st.session_state.customers if c['id'] == quotation['customer_id']), None)
+    
+    st.markdown("**Customer Information**")
+    if customer_data:
+        col1, col2 = st.columns(2)
+        with col1:
+            st.info(f"📧 **Customer:** {customer_data['name']}")
+            st.info(f"📞 **Phone:** {customer_data['phone']}")
+        with col2:
+            st.info(f"📍 **Address:** {customer_data.get('address', 'Not provided')}")
+            st.info(f"💰 **Payment Terms:** {customer_data.get('payment_terms', 30)} days")
+    
+    st.markdown("---")
+    
+    # Quotation details form
+    st.markdown("**Quotation Details**")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        pickup_location = st.text_input("Pickup Location*", value=quotation['pickup_location'], key=f"edit_pickup_{quotation['id']}")
+        delivery_location = st.text_input("Delivery Location*", value=quotation['delivery_location'], key=f"edit_delivery_{quotation['id']}")
+        vehicle_types = ["Tata Ace - 7ft", "Bolero / Dost - 8ft", "12 ft", "14 ft", "17 ft", "20 ft", "24 ft", "32 ft"]
+        vehicle_type_index = vehicle_types.index(quotation['vehicle_type']) if quotation['vehicle_type'] in vehicle_types else 0
+        vehicle_type = static_selectbox(
+            "Vehicle Type",
+            vehicle_types,
+            default_index=vehicle_type_index,
+            key=f"edit_vehicle_type_{quotation['id']}"
+        )
+        reference_number = st.text_input("Reference Number", value=quotation.get('reference_number', ''), key=f"edit_reference_{quotation['id']}")
+    
+    with col2:
+        distance_km = st.number_input("Distance (KM)", min_value=0.0, value=float(quotation['distance_km']), key=f"edit_distance_{quotation['id']}")
+        
+        # Weight with unit selection
+        weight_col1, weight_col2 = st.columns([2, 1])
+        with weight_col1:
+            weight_capacity = st.number_input("Weight Capacity", min_value=0.0, value=float(quotation['weight_capacity']), key=f"edit_weight_{quotation['id']}")
+        with weight_col2:
+            weight_units = ["kg", "tons"]
+            weight_unit_index = weight_units.index(quotation['weight_unit']) if quotation['weight_unit'] in weight_units else 0
+            weight_unit = static_selectbox("Unit", weight_units, default_index=weight_unit_index, key=f"edit_weight_unit_{quotation['id']}")
+        
+        trip_types = ["Local", "Long Distance", "Contract"]
+        trip_type_index = trip_types.index(quotation['trip_type']) if quotation['trip_type'] in trip_types else 0
+        trip_type = static_selectbox(
+            "Trip Type",
+            trip_types,
+            default_index=trip_type_index,
+            key=f"edit_trip_type_{quotation['id']}"
+        )
+    
+    with col3:
+        base_price = st.number_input("Base Price (₹)*", min_value=0.0, value=float(quotation['base_price']), key=f"edit_base_price_{quotation['id']}")
+        gst_applicable = st.checkbox("GST Applicable", value=quotation['gst_applicable'], key=f"edit_gst_{quotation['id']}")
+        payment_terms_options = [30, 45, 60, 90]
+        payment_terms_index = payment_terms_options.index(quotation['payment_terms']) if quotation['payment_terms'] in payment_terms_options else 0
+        payment_terms = static_selectbox(
+            "Payment Terms (Days)*",
+            payment_terms_options,
+            default_index=payment_terms_index,
+            key=f"edit_payment_terms_{quotation['id']}"
+        )
+    
+    # Additional charges
+    st.markdown("**Additional Charges**")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        loading_charges = st.number_input("Loading Charges (₹)", min_value=0.0, value=float(quotation.get('loading_charges', 0)), key=f"edit_loading_{quotation['id']}")
+        unloading_charges = st.number_input("Unloading Charges (₹)", min_value=0.0, value=float(quotation.get('unloading_charges', 0)), key=f"edit_unloading_{quotation['id']}")
+    
+    with col2:
+        airport_pass_charges = st.number_input("Airport Pass Charges (₹)", min_value=0.0, value=float(quotation.get('airport_pass_charges', 0)), key=f"edit_airport_pass_{quotation['id']}")
+        halting_charges = st.number_input("Halting Charges (₹)", min_value=0.0, value=float(quotation.get('halting_charges', 0)), key=f"edit_halting_{quotation['id']}")
+    
+    with col3:
+        fuel_surcharge = st.number_input("Fuel Surcharge (₹)", min_value=0.0, value=float(quotation.get('fuel_surcharge', 0)), key=f"edit_fuel_{quotation['id']}")
+        toll_charges = st.number_input("Toll Charges (₹)", min_value=0.0, value=float(quotation.get('toll_charges', 0)), key=f"edit_toll_{quotation['id']}")
+    
+    with col4:
+        other_charges = st.number_input("Other Charges (₹)", min_value=0.0, value=float(quotation.get('other_charges', 0)), key=f"edit_other_{quotation['id']}")
+        discount = st.number_input("Discount (₹)", min_value=0.0, value=float(quotation.get('discount', 0)), key=f"edit_discount_{quotation['id']}")
+    
+    # Calculate total
+    subtotal = base_price + fuel_surcharge + toll_charges + loading_charges + unloading_charges + airport_pass_charges + halting_charges + other_charges - discount
+    
+    if gst_applicable:
+        gst_amount = subtotal * 0.18  # 18% GST
+        total_amount = subtotal + gst_amount
+        st.metric("GST (18%)", f"₹{gst_amount:,.2f}")
+    else:
+        gst_amount = 0
+        total_amount = subtotal
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Subtotal", f"₹{subtotal:,.2f}")
+    with col2:
+        if gst_applicable:
+            st.metric("GST Amount", f"₹{gst_amount:,.2f}")
+    with col3:
+        original_total = float(quotation['total_amount'])
+        st.metric("Total Amount", f"₹{total_amount:,.2f}", delta=f"₹{total_amount - original_total:,.2f}")
+    
+    # Notes and terms
+    special_instructions = st.text_area("Special Instructions", value=quotation.get('special_instructions', ''), key=f"edit_instructions_{quotation['id']}")
+    
+    # Action buttons
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("💾 Save Changes", type="primary", key=f"save_edit_quotation_{quotation['id']}"):
+            # Validation
+            if not pickup_location or not delivery_location or base_price <= 0:
+                st.error("Pickup location, delivery location, and base price are required")
+                return
+            
+            if revise_mode:
+                # Create new revised quotation
+                from app import generate_quotation_number
+                new_quotation_number = generate_quotation_number()
+                
+                revised_quotation = {
+                    'id': str(uuid.uuid4()),
+                    'quotation_number': new_quotation_number,
+                    'customer_id': quotation['customer_id'],
+                    'customer_name': quotation['customer_name'],
+                    'pickup_location': pickup_location,
+                    'delivery_location': delivery_location,
+                    'vehicle_type': vehicle_type,
+                    'distance_km': distance_km,
+                    'weight_capacity': weight_capacity,
+                    'weight_unit': weight_unit,
+                    'reference_number': reference_number,
+                    'trip_type': trip_type,
+                    'base_price': base_price,
+                    'fuel_surcharge': fuel_surcharge,
+                    'toll_charges': toll_charges,
+                    'loading_charges': loading_charges,
+                    'unloading_charges': unloading_charges,
+                    'airport_pass_charges': airport_pass_charges,
+                    'halting_charges': halting_charges,
+                    'other_charges': other_charges,
+                    'discount': discount,
+                    'subtotal': subtotal,
+                    'gst_applicable': gst_applicable,
+                    'gst_amount': gst_amount,
+                    'total_amount': total_amount,
+                    'payment_terms': payment_terms,
+                    'special_instructions': special_instructions,
+                    'status': 'Draft',
+                    'created_date': datetime.datetime.now(),
+                    'created_by': 'Admin'
+                }
+                
+                # Save revised quotation
+                from app import save_quotation
+                if save_quotation(revised_quotation):
+                    # Reload quotations from database
+                    from database import get_cached_data
+                    st.session_state.quotations = get_cached_data('quotations', limit=100)
+                    
+                    # Add note to original quotation
+                    from .notes import add_status_note
+                    add_status_note(
+                        record_id=quotation['id'],
+                        record_type='quotation',
+                        old_status=quotation['status'],
+                        new_status=quotation['status'],
+                        changed_by='Admin',
+                        notes=f"Revised quotation {new_quotation_number} created from this quotation",
+                        additional_data={
+                            'original_quotation': quotation['quotation_number'],
+                            'revised_quotation': new_quotation_number
+                        }
+                    )
+                    
+                    # Clear editing state
+                    del st.session_state.editing_quotation_id
+                    if 'revise_mode' in st.session_state:
+                        del st.session_state.revise_mode
+                    
+                    st.success(f"✅ Revised quotation {new_quotation_number} created successfully!")
+                    st.rerun()
+                else:
+                    st.error("Failed to save revised quotation. Please try again.")
+                    
+            else:
+                # Update existing quotation
+                updated_quotation = {
+                    'pickup_location': pickup_location,
+                    'delivery_location': delivery_location,
+                    'vehicle_type': vehicle_type,
+                    'distance_km': distance_km,
+                    'weight_capacity': weight_capacity,
+                    'weight_unit': weight_unit,
+                    'reference_number': reference_number,
+                    'trip_type': trip_type,
+                    'base_price': base_price,
+                    'fuel_surcharge': fuel_surcharge,
+                    'toll_charges': toll_charges,
+                    'loading_charges': loading_charges,
+                    'unloading_charges': unloading_charges,
+                    'airport_pass_charges': airport_pass_charges,
+                    'halting_charges': halting_charges,
+                    'other_charges': other_charges,
+                    'discount': discount,
+                    'subtotal': subtotal,
+                    'gst_applicable': gst_applicable,
+                    'gst_amount': gst_amount,
+                    'total_amount': total_amount,
+                    'payment_terms': payment_terms,
+                    'special_instructions': special_instructions
+                }
+                
+                # Update in database
+                from database import update_in_database
+                if update_in_database('quotations', updated_quotation, quotation['id']):
+                    # Update local session state
+                    quotation.update(updated_quotation)
+                    
+                    # Reload quotations from database
+                    from database import get_cached_data
+                    st.session_state.quotations = get_cached_data('quotations', limit=100)
+                    
+                    # Add note
+                    from .notes import add_status_note
+                    add_status_note(
+                        record_id=quotation['id'],
+                        record_type='quotation',
+                        old_status=quotation['status'],
+                        new_status=quotation['status'],
+                        changed_by='Admin',
+                        notes=f"Quotation {quotation['quotation_number']} updated",
+                        additional_data={'quotation_number': quotation['quotation_number']}
+                    )
+                    
+                    # Clear editing state
+                    del st.session_state.editing_quotation_id
+                    
+                    st.success(f"✅ Quotation {quotation['quotation_number']} updated successfully!")
+                    st.rerun()
+                else:
+                    st.error("Failed to update quotation. Please try again.")
+    
+    with col2:
+        if st.button("❌ Cancel", key=f"cancel_edit_quotation_{quotation['id']}"):
+            # Clear editing state
+            del st.session_state.editing_quotation_id
+            if 'revise_mode' in st.session_state:
+                del st.session_state.revise_mode
+            st.rerun()
+    
+    with col3:
+        if not revise_mode:
+            if st.button("🔄 Create Revision Instead", key=f"switch_to_revise_{quotation['id']}", help="Create a new revised quotation instead of editing this one"):
+                st.session_state.revise_mode = True
+                st.rerun()
 
 def manage_customers():
     """Manage customer information"""

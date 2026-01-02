@@ -151,8 +151,10 @@ def add_vehicle_form():
         # Save to database
         from app import save_vehicle
         if save_vehicle(vehicle):
-            # Add to session state for immediate display
-            st.session_state.vehicles.append(vehicle)
+            # Refresh cached data properly
+            from database import refresh_data, get_cached_data
+            refresh_data('vehicles')
+            st.session_state.vehicles = get_cached_data('vehicles')
             
             st.success(f"Vehicle {registration_number} added successfully!")
             
@@ -195,8 +197,10 @@ def add_driver_form():
         # Save to database
         from app import save_driver
         if save_driver(driver):
-            # Add to session state for immediate display
-            st.session_state.drivers.append(driver)
+            # Refresh cached data properly
+            from database import refresh_data, get_cached_data
+            refresh_data('drivers')
+            st.session_state.drivers = get_cached_data('drivers')
             
             st.success(f"Driver {driver_name} added successfully!")
             
@@ -208,8 +212,6 @@ def add_driver_form():
             st.rerun()
         else:
             st.error("Failed to save driver. Please try again.")
-        
-        st.rerun()
 
 def fuel_logs():
     """Manage fuel logs"""

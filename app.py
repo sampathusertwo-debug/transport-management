@@ -323,27 +323,21 @@ def check_stored_session():
         not st.session_state.get('authenticated', False)):
         
         try:
-            # Check if session is still valid (within 20 minutes)
-            last_activity = st.session_state.last_activity
+            # Restore session without timeout check
             current_time = datetime.datetime.now()
-            time_diff = (current_time - last_activity).total_seconds() / 60
             
-            if time_diff <= 20:  # Session still valid
-                # Parse session token
-                token_parts = st.session_state.session_token.split('|')
-                if len(token_parts) >= 4:
-                    username, role, full_name, user_id = token_parts[:4]
-                    
-                    # Restore session
-                    st.session_state.authenticated = True
-                    st.session_state.username = username
-                    st.session_state.user_role = role
-                    st.session_state.user_full_name = full_name
-                    st.session_state.user_id = user_id if user_id else None
-                    st.session_state.last_activity = current_time
-            else:
-                # Session expired, clear it
-                clear_session_data()
+            # Parse session token
+            token_parts = st.session_state.session_token.split('|')
+            if len(token_parts) >= 4:
+                username, role, full_name, user_id = token_parts[:4]
+                
+                # Restore session
+                st.session_state.authenticated = True
+                st.session_state.username = username
+                st.session_state.user_role = role
+                st.session_state.user_full_name = full_name
+                st.session_state.user_id = user_id if user_id else None
+                st.session_state.last_activity = current_time
         except Exception:
             # Invalid session data, clear it
             clear_session_data()
@@ -365,21 +359,10 @@ def clear_session_data():
             del st.session_state[key]
 
 def check_session_timeout():
-    """Check if session has timed out due to inactivity"""
-    if st.session_state.get('authenticated') and 'last_activity' in st.session_state:
-        current_time = datetime.datetime.now()
-        last_activity = st.session_state.last_activity
-        
-        # Check if inactive for more than 20 minutes
-        time_diff = (current_time - last_activity).total_seconds() / 60
-        
-        if time_diff > 20:
-            st.warning("⏰ Session expired due to inactivity. Please login again.")
-            logout_user()
-            return True
-        else:
-            # Update last activity on each interaction
-            st.session_state.last_activity = current_time
+    """Session timeout disabled - just update last activity"""
+    if st.session_state.get('authenticated'):
+        # Update last activity on each interaction (no timeout check)
+        st.session_state.last_activity = datetime.datetime.now()
     
     return False
 
@@ -458,9 +441,9 @@ def main():
         show_login_page()
         return
     
-    # Check session timeout
-    if check_session_timeout():
-        return
+    # Session timeout check disabled to prevent automatic logout
+    # if check_session_timeout():
+    #     return
     
     # Custom CSS for modern UI design
     st.markdown("""

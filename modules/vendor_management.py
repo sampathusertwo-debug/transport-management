@@ -79,7 +79,7 @@ def vendor_bills():
         bill_category = st.selectbox(
             "Category*",
             ["Fuel", "Maintenance", "Tolls", "Office Expenses", "Loans", "Insurance", 
-             "Driver Salary", "Vehicle Parts", "Permits", "Other"],
+             "Driver Salary", "Vehicle Parts", "Vehicle Vendor", "Permits", "Other"],
             key="bill_category"
         )
         due_date = st.date_input("Due Date", value=bill_date + datetime.timedelta(days=30), key="bill_due_date")

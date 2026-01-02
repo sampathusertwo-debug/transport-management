@@ -316,23 +316,35 @@ def create_invoice_from_booking(booking):
         additional_misc = st.number_input("Miscellaneous Charges (₹)", min_value=0.0, value=0.0, key="invoice_misc")
         extra_discount = st.number_input("Extra Discount (₹)", min_value=0.0, value=0.0, key="invoice_discount")
     
-    # Calculate amounts (ensure all are float for compatibility)
-    # Use booking's base amount (not total)
-    base_amount = float(booking_base)
+    # Calculate amounts - Use booking's existing amounts to avoid GST duplication
+    # Get booking's existing GST information
+    booking_gst_applicable = booking.get('gst_applicable', True)
+    booking_gst_amount = safe_float(booking.get('gst_amount'), 0.0)
+    booking_total_amount = safe_float(booking.get('total_amount'), 0.0)
     
-    # All booking charges
-    booking_charges_total = float(booking_loading + booking_unloading + booking_airport_pass + booking_halting + booking_fuel + booking_toll + booking_other)
+    # Base amount should be the booking's subtotal (before GST)
+    if booking_gst_applicable and booking_gst_amount > 0:
+        # If booking has GST, calculate the pre-GST amount
+        booking_subtotal = booking_total_amount - booking_gst_amount
+    else:
+        booking_subtotal = booking_total_amount
     
-    # Additional charges from invoice form
-    additional_charges = float(additional_fuel + additional_toll + additional_loading + additional_detention + additional_misc)
+    # All booking charges (these are already in the booking subtotal, so don't double count)
+    booking_charges_total = float(booking_loading + booking_unloading + booking_airport_pass + booking_halting + booking_fuel + booking_toll + booking_other - booking_discount)
     
-    # Total discounts
-    total_discount = float(booking_discount + extra_discount)
+    # Additional charges from invoice form (these are new)
+    additional_charges = float(additional_fuel + additional_toll + additional_loading + additional_detention + additional_misc - extra_discount)
     
-    # Calculate subtotal: base + booking charges + additional charges - total discount
-    subtotal = float(base_amount + booking_charges_total + additional_charges - total_discount)
+    # Base amount is booking base + additional charges (but not other booking charges as they're already included in booking total)
+    base_amount = booking_base + additional_charges
     
-    # GST calculation (only for GST invoices)
+    # Calculate total discount
+    total_discount = booking_discount + extra_discount
+    
+    # Calculate new subtotal
+    subtotal = base_amount
+    
+    # GST handling - respect booking's GST settings and only apply to additional charges
     if invoice_type == "GST Invoice":
         gst_applicable = True
         
@@ -343,7 +355,15 @@ def create_invoice_from_booking(booking):
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            gst_rate = st.selectbox("GST Rate (%)", [5, 12, 18, 28], index=2, key="gst_rate")
+            # Use booking's GST rate if available, otherwise default to 18%
+            default_gst_rate = 18
+            if booking_gst_applicable and booking_gst_amount > 0 and booking_subtotal > 0:
+                calculated_rate = round((booking_gst_amount / booking_subtotal) * 100)
+                default_gst_rate = calculated_rate if calculated_rate in [5, 12, 18, 28] else 18
+            
+            gst_rate = st.selectbox("GST Rate (%)", [5, 12, 18, 28], 
+                                 index=[5, 12, 18, 28].index(default_gst_rate) if default_gst_rate in [5, 12, 18, 28] else 2, 
+                                 key="gst_rate")
         
         with col2:
             # Show customer GST status
@@ -357,18 +377,37 @@ def create_invoice_from_booking(booking):
             gst_type = st.selectbox("GST Type", ["CGST+SGST", "IGST"], key="gst_type",
                                    help="CGST+SGST for same state, IGST for interstate")
         
+        # Apply GST to the subtotal (booking base + additional charges)
         gst_amount = float(subtotal * (gst_rate / 100))
         total_amount = float(subtotal + gst_amount)
         
-        # Display GST breakdown
+        # Show GST breakdown
         st.markdown(f"**GST Breakdown ({gst_type}):**")
+        if additional_charges > 0:
+            st.info(f"📝 GST applied only to base amount (₹{booking_base:,.2f}) + additional charges (₹{additional_charges:,.2f})")
+        else:
+            st.info(f"📝 GST applied to booking base amount (₹{booking_base:,.2f})")
+            
         if gst_type == "CGST+SGST":
             cgst = sgst = gst_amount / 2
             st.write(f"CGST ({gst_rate/2}%): ₹{cgst:,.2f}")
             st.write(f"SGST ({gst_rate/2}%): ₹{sgst:,.2f}")
         else:
             st.write(f"IGST ({gst_rate}%): ₹{gst_amount:,.2f}")
+            
+    elif booking_gst_applicable:
+        # If booking had GST but invoice type is not GST invoice, use booking's GST
+        st.warning("⚠️ Original booking included GST. Using booking's GST calculation to avoid duplication.")
+        gst_applicable = True
+        gst_amount = booking_gst_amount
+        gst_rate = round((booking_gst_amount / booking_subtotal) * 100) if booking_subtotal > 0 else 18
+        gst_type = "From Booking"
+        total_amount = float(subtotal + gst_amount)
+        
+        st.info(f"📝 Using booking's GST: ₹{gst_amount:,.2f} ({gst_rate}%)")
+        
     else:
+        # No GST applicable
         gst_applicable = False
         gst_rate = 0
         gst_amount = 0.0
@@ -1223,7 +1262,7 @@ def generate_invoice_pdf(invoice):
         ['', 'BALANCE DUE:', f"{invoice.get('outstanding_amount', subtotal + gst_amount):.2f}"]
     ]
     
-    summary_table = Table(summary_data, colWidths=[3.5*inch, 1.5*inch, 1.2*inch], rowHeights=[None, 25, None])
+    summary_table = Table(summary_data, colWidths=[3.5*inch, 1.5*inch, 1.2*inch], rowHeights=[None, 25, None, None, None])
     summary_table.setStyle(TableStyle([
         ('ALIGN', (0, 0), (0, 0), 'LEFT'),
         ('ALIGN', (0, 1), (0, 1), 'LEFT'),

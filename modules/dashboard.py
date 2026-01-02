@@ -12,6 +12,8 @@ def show():
     # Load minimal data needed for dashboard
     bookings = load_data_when_needed('bookings')
     invoices = load_data_when_needed('invoices')
+    customer_payments = load_data_when_needed('customer_payments')
+    customers = load_data_when_needed('customers')
     
     # Period filter
     col1, col2 = st.columns([3, 1])
@@ -25,7 +27,7 @@ def show():
     with col2:
         period_type = st.selectbox(
             "Period Type",
-            ["This Month", "Last Month", "This Year", "Custom Range"],
+            ["This Year", "This Month", "Last Month", "Custom Range"],
             key="dashboard_period_type",
             label_visibility="collapsed"
         )
@@ -55,6 +57,11 @@ def show():
     # Display modern metric cards
     display_modern_metric_cards(metrics)
     
+    # Show helpful message if no data found
+    if (metrics['total_bookings'] == 0 and metrics['total_revenue'] == 0 and 
+        metrics['total_receipts'] == 0 and metrics['pending_billings'] == 0):
+        st.info(f"📊 No data found for the selected period ({metrics['from_date'].strftime('%d %b %Y')} to {metrics['to_date'].strftime('%d %b %Y')}). Try changing the period filter above or check if there are bookings for different date ranges.")
+    
     # Display recent bookings table
     display_recent_bookings_table(from_date, to_date)
 
@@ -64,19 +71,24 @@ def show():
 
 def calculate_dashboard_metrics(from_date, to_date):
     """Calculate dashboard metrics for the given date range"""
+    # Ensure data is available in session state
+    bookings_data = getattr(st.session_state, 'bookings', [])
+    invoices_data = getattr(st.session_state, 'invoices', [])
+    payments_data = getattr(st.session_state, 'customer_payments', [])
+    
     # Filter data by date range with safe date conversion
     filtered_bookings = [
-        b for b in st.session_state.bookings 
+        b for b in bookings_data 
         if from_date <= safe_get_date(b.get('created_date', datetime.datetime.now())) <= to_date
     ]
     
     filtered_invoices = [
-        i for i in st.session_state.invoices 
+        i for i in invoices_data 
         if from_date <= safe_get_date(i.get('created_date', datetime.datetime.now())) <= to_date
     ]
     
     filtered_payments = [
-        p for p in st.session_state.customer_payments 
+        p for p in payments_data 
         if from_date <= safe_get_date(p.get('created_date', datetime.datetime.now())) <= to_date
     ]
     
@@ -89,7 +101,7 @@ def calculate_dashboard_metrics(from_date, to_date):
     pending_billings = len([
         b for b in filtered_bookings 
         if b.get('status') in ['Delivered', 'POD Generated'] and 
-        not any(i['booking_id'] == b['id'] for i in st.session_state.invoices)
+        not any(i.get('booking_id') == b.get('id') for i in invoices_data)
     ])
     
     return {
@@ -138,12 +150,13 @@ def display_recent_bookings_table(from_date, to_date):
     </div>
     ''', unsafe_allow_html=True)
     
-    if not st.session_state.bookings:
+    bookings_data = getattr(st.session_state, 'bookings', [])
+    if not bookings_data:
         st.info("No bookings found.")
         return
     
     # Get recent bookings (last 10)
-    recent_bookings = sorted(st.session_state.bookings, 
+    recent_bookings = sorted(bookings_data, 
                            key=lambda x: x.get('created_date', datetime.datetime.now()), 
                            reverse=True)[:10]
     
@@ -187,7 +200,8 @@ def display_customer_outstanding_report():
     customer_outstanding = {}
     
     # Get all customers
-    for customer in st.session_state.customers:
+    customers_data = getattr(st.session_state, 'customers', [])
+    for customer in customers_data:
         customer_outstanding[customer['name']] = {
             'customer_id': customer['id'],
             'customer_name': customer['name'],
@@ -200,7 +214,8 @@ def display_customer_outstanding_report():
         }
     
     # Calculate outstanding from invoices
-    for invoice in st.session_state.invoices:
+    invoices_data = getattr(st.session_state, 'invoices', [])
+    for invoice in invoices_data:
         customer_name = invoice['customer_name']
         if customer_name in customer_outstanding:
             customer_outstanding[customer_name]['total_invoices'] += 1
@@ -337,8 +352,9 @@ def display_detailed_data(from_date, to_date):
     
     with tab1:
         st.markdown("#### Recent Bookings")
+        bookings_data = getattr(st.session_state, 'bookings', [])
         recent_bookings = [
-            b for b in st.session_state.bookings 
+            b for b in bookings_data 
             if from_date <= safe_get_date(b.get('pickup_date', datetime.datetime.now())) <= to_date
         ]
         recent_bookings = sorted(recent_bookings, key=lambda x: safe_get_date(x.get('created_date', datetime.datetime.now())), reverse=True)[:10]
@@ -372,8 +388,9 @@ def display_detailed_data(from_date, to_date):
     
     with tab2:
         st.markdown("#### Recent Invoices")
+        invoices_data = getattr(st.session_state, 'invoices', [])
         recent_invoices = [
-            inv for inv in st.session_state.invoices 
+            inv for inv in invoices_data 
             if from_date <= safe_get_date(inv.get('invoice_date', datetime.datetime.now())) <= to_date
         ]
         recent_invoices = sorted(recent_invoices, key=lambda x: safe_get_date(x.get('created_date', datetime.datetime.now())), reverse=True)[:10]
@@ -411,9 +428,10 @@ def display_detailed_data(from_date, to_date):
     
     with tab3:
         st.markdown("#### Recent Payments")
-        if 'customer_payments' in st.session_state:
+        payments_data = getattr(st.session_state, 'customer_payments', [])
+        if payments_data:
             recent_payments = [
-                p for p in st.session_state.customer_payments 
+                p for p in payments_data 
                 if from_date <= safe_get_date(p.get('payment_date', datetime.datetime.now())) <= to_date
             ]
             recent_payments = sorted(recent_payments, key=lambda x: safe_get_date(x.get('created_date', datetime.datetime.now())), reverse=True)[:10]
@@ -442,9 +460,10 @@ def display_detailed_data(from_date, to_date):
     with tab4:
         st.markdown("#### Vehicle Status")
         
-        if 'vehicles' in st.session_state and st.session_state.vehicles:
+        vehicles_data = getattr(st.session_state, 'vehicles', [])
+        if vehicles_data:
             vehicle_data = []
-            for vehicle in st.session_state.vehicles:
+            for vehicle in vehicles_data:
                 status_icon = {
                     'Active': '🟢',
                     'Maintenance': '🟡',
@@ -454,8 +473,9 @@ def display_detailed_data(from_date, to_date):
                 # Get latest odometer reading if available
                 last_reading = "No data"
                 last_reading_date = 'N/A'
-                if 'odometer_logs' in st.session_state:
-                    vehicle_odometer = [log for log in st.session_state.odometer_logs 
+                odometer_logs_data = getattr(st.session_state, 'odometer_logs', [])
+                if odometer_logs_data:
+                    vehicle_odometer = [log for log in odometer_logs_data 
                                      if log.get('vehicle_registration') == vehicle.get('registration_number')]
                     
                     if vehicle_odometer:

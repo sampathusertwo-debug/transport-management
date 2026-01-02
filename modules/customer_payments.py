@@ -124,13 +124,24 @@ def record_invoice_payment(invoice):
     
     with col1:
         payment_date = st.date_input("Payment Date*", value=datetime.datetime.now().date(), key="payment_date")
+        outstanding_amount = float(invoice['outstanding_amount'])
         payment_amount = st.number_input(
             "Payment Amount (₹)*", 
-            min_value=0.0, 
-            value=float(invoice['outstanding_amount']),
-            max_value=float(invoice['outstanding_amount']),
-            key="payment_amount"
+            min_value=0.01, 
+            value=outstanding_amount,
+            max_value=outstanding_amount,
+            step=0.01,
+            key="payment_amount",
+            help=f"Maximum allowed: ₹{outstanding_amount:,.2f}"
         )
+        
+        # Client-side validation warning
+        if payment_amount > outstanding_amount:
+            st.error(f"❌ Payment amount (₹{payment_amount:,.2f}) cannot exceed outstanding amount (₹{outstanding_amount:,.2f})")
+        elif payment_amount == outstanding_amount:
+            st.success("✅ This will fully settle the invoice")
+        elif payment_amount > 0:
+            st.info(f"💡 Remaining balance after payment: ₹{outstanding_amount - payment_amount:,.2f}")
     
     with col2:
         payment_method = st.selectbox(
@@ -149,10 +160,21 @@ def record_invoice_payment(invoice):
     st.markdown("**Payment Allocation**")
     st.info(f"This payment will be automatically allocated to Invoice {invoice['invoice_number']}")
     
-    # Submit payment
-    if st.button("Record Payment", type="primary"):
-        if not payment_date or payment_amount <= 0:
-            st.error("Payment date and amount are required")
+    # Submit payment - disabled if amount is invalid
+    payment_button_disabled = payment_amount <= 0 or payment_amount > outstanding_amount
+    
+    if st.button("Record Payment", type="primary", disabled=payment_button_disabled):
+        # Server-side validation
+        if not payment_date:
+            st.error("Payment date is required")
+            return
+            
+        if payment_amount <= 0:
+            st.error("Payment amount must be greater than 0")
+            return
+            
+        if payment_amount > outstanding_amount:
+            st.error(f"Payment amount (₹{payment_amount:,.2f}) cannot exceed outstanding amount (₹{outstanding_amount:,.2f})")
             return
         
         # Create payment record
@@ -265,16 +287,25 @@ def record_manual_payment():
     with col1:
         payment_date = st.date_input("Payment Date*", value=datetime.datetime.now().date(), key="manual_payment_date")
         
-        # Calculate total outstanding for default amount
+        # Calculate total outstanding for default amount and validation
         total_outstanding_for_customer = sum(float(inv['outstanding_amount']) for inv in customer_invoices)
         
         payment_amount = st.number_input(
             "Payment Amount (₹)*", 
-            min_value=0.0, 
+            min_value=0.01, 
             value=float(total_outstanding_for_customer), 
+            step=0.01,
             key="manual_payment_amount",
-            help="Default is total outstanding amount"
+            help=f"Total outstanding: ₹{total_outstanding_for_customer:,.2f}"
         )
+        
+        # Show payment validation information
+        if payment_amount > total_outstanding_for_customer:
+            st.warning(f"⚠️ Payment amount (₹{payment_amount:,.2f}) exceeds total outstanding (₹{total_outstanding_for_customer:,.2f}). This will create an unallocated credit balance.")
+        elif payment_amount == total_outstanding_for_customer:
+            st.success("✅ This will fully settle all outstanding invoices")
+        elif payment_amount > 0:
+            st.info(f"💡 Remaining outstanding after payment: ₹{total_outstanding_for_customer - payment_amount:,.2f}")
     
     with col2:
         payment_method = st.selectbox(
@@ -311,29 +342,46 @@ def record_manual_payment():
                 st.write(f"{inv['invoice_number']} - Due: {inv['due_date']} - Outstanding: ₹{inv['outstanding_amount']:,.2f}")
             
             with col2:
+                outstanding_amount = float(inv['outstanding_amount'])
                 allocate_amount = st.number_input(
                     f"Allocate Amount",
                     min_value=0.0,
-                    max_value=float(inv['outstanding_amount']),
+                    max_value=outstanding_amount,
                     value=0.0,
+                    step=0.01,
                     key=f"allocate_{inv['id']}",
-                    format="%.2f"
+                    format="%.2f",
+                    help=f"Max: ₹{outstanding_amount:,.2f}"
                 )
+                
+                # Show allocation validation
+                if allocate_amount > outstanding_amount:
+                    st.error(f"❌ Cannot allocate more than outstanding amount")
+                elif allocate_amount == outstanding_amount:
+                    st.success("✅ Will fully settle this invoice")
             
             with col3:
-                if allocate_amount > 0:
+                if allocate_amount > 0 and allocate_amount <= outstanding_amount:
                     allocated_invoices.append(inv['invoice_number'])
                     total_allocated += allocate_amount
         
-        st.write(f"**Total Allocated:** ₹{total_allocated:,.2f}")
-        st.write(f"**Payment Amount:** ₹{payment_amount:,.2f}")
+        # Enhanced allocation summary
+        st.markdown("**Allocation Summary:**")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Allocated", f"₹{total_allocated:,.2f}")
+        with col2:
+            st.metric("Payment Amount", f"₹{payment_amount:,.2f}")
+        with col3:
+            unallocated = payment_amount - total_allocated
+            st.metric("Unallocated", f"₹{unallocated:,.2f}")
         
         # Convert to float for proper comparison
         total_allocated_float = float(total_allocated)
         payment_amount_float = float(payment_amount)
         
         if total_allocated_float > payment_amount_float:
-            st.error(f"Total allocated (₹{total_allocated_float:,.2f}) cannot exceed payment amount (₹{payment_amount_float:,.2f})")
+            st.error(f"❌ Total allocated (₹{total_allocated_float:,.2f}) cannot exceed payment amount (₹{payment_amount_float:,.2f})")
             return
     
     # Submit payment
