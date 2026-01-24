@@ -124,6 +124,18 @@ def show_create_user_form():
                 st.info(f"🔑 **Temporary Password:** {password}")
                 st.info("📝 **Note:** User will be asked to change password on first login")
                 
+                # Additional success actions
+                st.markdown("---")
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("➕ Create Another User", key="create_another_user", type="primary"):
+                        # Keep the current form for creating another user
+                        pass  # Form will be ready for next user
+                with col2:
+                    if st.button("👥 View User List", key="view_user_list"):
+                        # Switch to user list tab
+                        st.info("Switch to 'User List' tab to view all users")
+                
                 # Clear form data
                 for key in form_keys:
                     st.session_state[key] = ""

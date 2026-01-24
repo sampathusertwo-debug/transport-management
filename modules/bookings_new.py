@@ -25,7 +25,7 @@ def show_success_page(title, message, created_item_id=None, created_item_number=
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        if st.button(f"➕ Create Another {module_name.title().rstrip('s')}", type="primary", width="stretch"):
+        if st.button(f"➕ Create Another {module_name.title().rstrip('s')}", type="primary", use_container_width=True):
             # Clear any success flags and return to create mode
             if 'show_success_page' in st.session_state:
                 del st.session_state['show_success_page']
@@ -34,7 +34,7 @@ def show_success_page(title, message, created_item_id=None, created_item_number=
             st.rerun()
     
     with col2:
-        if st.button(f"👀 View All {module_name.title()}", width="stretch"):
+        if st.button(f"👀 View All {module_name.title()}", use_container_width=True):
             # Navigate to view/list mode
             if 'show_success_page' in st.session_state:
                 del st.session_state['show_success_page']
@@ -45,7 +45,7 @@ def show_success_page(title, message, created_item_id=None, created_item_number=
             st.rerun()
     
     with col3:
-        if st.button("🏠 Go to Dashboard", width="stretch"):
+        if st.button("🏠 Go to Dashboard", use_container_width=True):
             # Clear success state and go to dashboard
             if 'show_success_page' in st.session_state:
                 del st.session_state['show_success_page']
@@ -140,72 +140,25 @@ def create_booking():
         vehicle_type = st.selectbox("Vehicle Type*", ["7ft", "8ft", "12ft", "14ft", "17ft", "20ft", "24ft", "32ft"], key="booking_vehicle_type")
     
     with col2:
-        pickup_location = st.text_input("Pick up*", placeholder="e.g., Mepz", key="booking_pickup")
-        destination = st.text_input("Destination*", placeholder="e.g., Airport", key="booking_destination")
+        route_from = st.text_input("Route From*", placeholder="e.g., Mepz", key="booking_route_from")
+        route_to = st.text_input("Route To*", placeholder="e.g., Airport", key="booking_route_to")
     
     st.markdown("**🚛 VEHICLE & DRIVER DETAILS**")
     col1, col2 = st.columns(2)
     
-    # Load vehicle and driver data
-    from database import load_data_when_needed
-    load_data_when_needed('vehicles')
-    load_data_when_needed('drivers')
-    
     with col1:
-        # Vehicle selection
-        if hasattr(st.session_state, 'vehicles') and st.session_state.vehicles:
-            vehicle_options = ["None"] + [v['registration_number'] for v in st.session_state.vehicles if v.get('status') == 'Active']
-            selected_vehicle = searchable_selectbox("Vehicle Reg No", vehicle_options, key="booking_vehicle")
-            vehicle_reg_no = selected_vehicle if selected_vehicle != "None" else ""
-            
-            # Get driver info for selected vehicle
-            selected_vehicle_data = next((v for v in st.session_state.vehicles if v['registration_number'] == selected_vehicle), None) if selected_vehicle != "None" else None
-            linked_driver_name = selected_vehicle_data.get('linked_driver') if selected_vehicle_data else ""
-        else:
-            st.warning("No vehicles found. Please add vehicles in Vehicle Master.")
-            vehicle_reg_no = st.text_input("Vehicle Reg No", placeholder="e.g., TN1XXXXXX", key="booking_reg_no_manual")
-            linked_driver_name = ""
-        
-        # Driver selection
-        if hasattr(st.session_state, 'drivers') and st.session_state.drivers:
-            driver_options = ["None"] + [d['name'] for d in st.session_state.drivers if d.get('status') in ['Available', 'On Trip']]
-            # Pre-select linked driver if vehicle has one
-            default_driver_index = 0
-            if linked_driver_name and linked_driver_name in driver_options:
-                default_driver_index = driver_options.index(linked_driver_name)
-            
-            selected_driver = searchable_selectbox("Driver", driver_options, default_index=default_driver_index, key="booking_driver_select")
-            driver = selected_driver if selected_driver != "None" else ""
-            
-            # Get driver phone for selected driver
-            selected_driver_data = next((d for d in st.session_state.drivers if d['name'] == selected_driver), None) if selected_driver != "None" else None
-            driver_phone_from_master = selected_driver_data.get('phone', '') if selected_driver_data else ''
-        else:
-            driver = st.text_input("Driver", placeholder="e.g., Nithish", key="booking_driver_manual")
-            driver_phone_from_master = ""
+        vehicle_reg_no = st.text_input("Vehicle Reg No", placeholder="e.g., TN1XXXXXX", key="booking_reg_no")
+        driver = st.text_input("Driver", placeholder="e.g., Nithish", key="booking_driver")
     
     with col2:
-        # Driver phone - dynamically update based on selected driver
-        current_driver = st.session_state.get('booking_driver_select', 'None')
-        
-        # Check if driver selection has changed and update phone accordingly
-        if current_driver != "None" and hasattr(st.session_state, 'drivers') and st.session_state.drivers:
-            selected_driver_data = next((d for d in st.session_state.drivers if d['name'] == current_driver), None)
-            if selected_driver_data:
-                # Update the phone number in session state when driver changes
-                new_phone = selected_driver_data.get('phone', '')
-                if f'last_booking_driver' not in st.session_state or st.session_state[f'last_booking_driver'] != current_driver:
-                    st.session_state['booking_driver_phone'] = new_phone
-                    st.session_state[f'last_booking_driver'] = current_driver
-        
         driver_phone = st.text_input("Driver Phone", placeholder="e.g., +91 7339X XXXXX", key="booking_driver_phone")
         status = st.selectbox("Status", ["CREATED", "CONFIRMED", "DISPATCHED", "DELIVERED", "CANCELLED"], 
                              index=1, key="booking_status")  # Default to CONFIRMED
     
     # Submit button
-    if st.button("💾 Create Booking", type="primary", width="stretch"):
+    if st.button("💾 Create Booking", type="primary", use_container_width=True):
         # Validation
-        if not customer or not booking_date or not vehicle_type or not pickup_location or not destination:
+        if not customer or not booking_date or not vehicle_type or not route_from or not route_to:
             st.error("❌ Please fill all required fields marked with *")
             return
         
@@ -216,8 +169,8 @@ def create_booking():
             'customer': customer,
             'booking_date': booking_date,
             'vehicle_type': vehicle_type,
-            'route_from': pickup_location,
-            'route_to': destination,
+            'route_from': route_from,
+            'route_to': route_to,
             'vehicle_reg_no': vehicle_reg_no,
             'driver': driver,
             'driver_phone': driver_phone,
@@ -236,8 +189,8 @@ def create_booking():
                 st.session_state.bookings.insert(0, booking_data)  # Add at top
                 
                 # Clear form
-                for key in ['booking_customer', 'booking_pickup', 'booking_destination', 
-                           'booking_vehicle', 'booking_driver_select', 'booking_driver_phone']:
+                for key in ['booking_customer', 'booking_route_from', 'booking_route_to', 
+                           'booking_reg_no', 'booking_driver', 'booking_driver_phone']:
                     if key in st.session_state:
                         del st.session_state[key]
                 
@@ -256,139 +209,10 @@ def create_booking():
             st.error(f"❌ Error creating booking: {str(e)}")
 
 def create_cash_booking():
-    """Create cash booking with separate form"""
+    """Create cash booking - same as regular booking for now"""
     st.subheader("Create Cash Booking")
-    st.info("📋 Quick cash booking form for immediate transactions.")
-    
-    # Generate booking number (show it to user)
-    from app import generate_booking_number
-    booking_number = generate_booking_number()
-    
-    st.info(f"**Booking Number:** {booking_number}")
-    
-    # Simple booking form
-    st.markdown("**📋 CASH BOOKING DETAILS**")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        customer = st.text_input("Customer*", placeholder="e.g., Fast Logistics", key="cash_booking_customer")
-        booking_date = st.date_input("Date*", value=datetime.datetime.now().date(), key="cash_booking_date")
-        vehicle_type = st.selectbox("Vehicle Type*", ["7ft", "8ft", "12ft", "14ft", "17ft", "20ft", "24ft", "32ft"], key="cash_booking_vehicle_type")
-    
-    with col2:
-        pickup_location = st.text_input("Pick up*", placeholder="e.g., Mepz", key="cash_booking_pickup")
-        destination = st.text_input("Destination*", placeholder="e.g., Airport", key="cash_booking_destination")
-    
-    st.markdown("**🚛 VEHICLE & DRIVER DETAILS**")
-    col1, col2 = st.columns(2)
-    
-    # Load vehicle and driver data
-    from database import load_data_when_needed
-    load_data_when_needed('vehicles')
-    load_data_when_needed('drivers')
-    
-    with col1:
-        # Vehicle selection
-        if hasattr(st.session_state, 'vehicles') and st.session_state.vehicles:
-            vehicle_options = ["None"] + [v['registration_number'] for v in st.session_state.vehicles if v.get('status') == 'Active']
-            selected_vehicle = searchable_selectbox("Vehicle Reg No", vehicle_options, key="cash_booking_vehicle")
-            vehicle_reg_no = selected_vehicle if selected_vehicle != "None" else ""
-            
-            # Get driver info for selected vehicle
-            selected_vehicle_data = next((v for v in st.session_state.vehicles if v['registration_number'] == selected_vehicle), None) if selected_vehicle != "None" else None
-            linked_driver_name = selected_vehicle_data.get('linked_driver') if selected_vehicle_data else ""
-        else:
-            st.warning("No vehicles found. Please add vehicles in Vehicle Master.")
-            vehicle_reg_no = st.text_input("Vehicle Reg No", placeholder="e.g., TN1XXXXXX", key="cash_booking_reg_no_manual")
-            linked_driver_name = ""
-        
-        # Driver selection
-        if hasattr(st.session_state, 'drivers') and st.session_state.drivers:
-            driver_options = ["None"] + [d['name'] for d in st.session_state.drivers if d.get('status') in ['Available', 'On Trip']]
-            # Pre-select linked driver if vehicle has one
-            default_driver_index = 0
-            if linked_driver_name and linked_driver_name in driver_options:
-                default_driver_index = driver_options.index(linked_driver_name)
-            
-            selected_driver = searchable_selectbox("Driver", driver_options, default_index=default_driver_index, key="cash_booking_driver_select")
-            driver = selected_driver if selected_driver != "None" else ""
-            
-            # Get driver phone for selected driver
-            selected_driver_data = next((d for d in st.session_state.drivers if d['name'] == selected_driver), None) if selected_driver != "None" else None
-            driver_phone_from_master = selected_driver_data.get('phone', '') if selected_driver_data else ''
-        else:
-            driver = st.text_input("Driver", placeholder="e.g., Nithish", key="cash_booking_driver_manual")
-            driver_phone_from_master = ""
-
-    with col2:
-        # Driver phone - dynamically update based on selected driver
-        current_driver = st.session_state.get('cash_booking_driver_select', 'None')
-        
-        # Check if driver selection has changed and update phone accordingly
-        if current_driver != "None" and hasattr(st.session_state, 'drivers') and st.session_state.drivers:
-            selected_driver_data = next((d for d in st.session_state.drivers if d['name'] == current_driver), None)
-            if selected_driver_data:
-                # Update the phone number in session state when driver changes
-                new_phone = selected_driver_data.get('phone', '')
-                if f'last_cash_booking_driver' not in st.session_state or st.session_state[f'last_cash_booking_driver'] != current_driver:
-                    st.session_state['cash_booking_driver_phone'] = new_phone
-                    st.session_state[f'last_cash_booking_driver'] = current_driver
-        
-        driver_phone = st.text_input("Driver Phone", placeholder="e.g., +91 7339X XXXXX", key="cash_booking_driver_phone")
-        status = st.selectbox("Status", ["CREATED", "CONFIRMED", "DISPATCHED", "DELIVERED", "CANCELLED"], 
-                             index=1, key="cash_booking_status")  # Default to CONFIRMED
-    # Submit button
-    if st.button("💾 Create Cash Booking", type="primary", width="stretch"):
-        # Validation
-        if not customer or not booking_date or not vehicle_type or not pickup_location or not destination:
-            st.error("❌ Please fill all required fields marked with *")
-            return
-        
-        # Create booking data
-        booking_data = {
-            'id': str(uuid.uuid4()),
-            'booking_number': booking_number,
-            'customer': customer,
-            'booking_date': booking_date,
-            'vehicle_type': vehicle_type,
-            'route_from': pickup_location,
-            'route_to': destination,
-            'vehicle_reg_no': vehicle_reg_no,
-            'driver': driver,
-            'driver_phone': driver_phone,
-            'status': status,
-            'created_date': datetime.datetime.now(),
-            'last_modified': datetime.datetime.now()
-        }
-        
-        # Save to database
-        from app import save_simplified_booking
-        try:
-            if save_simplified_booking(booking_data):
-                # Add to session state for immediate display
-                if 'bookings' not in st.session_state:
-                    st.session_state.bookings = []
-                st.session_state.bookings.insert(0, booking_data)  # Add at top
-                
-                # Clear form
-                for key in ['cash_booking_customer', 'cash_booking_pickup', 'cash_booking_destination', 
-                           'cash_booking_vehicle', 'cash_booking_driver_select', 'cash_booking_driver_phone']:
-                    if key in st.session_state:
-                        del st.session_state[key]
-                
-                # Show success
-                st.session_state['show_success_page'] = True
-                st.session_state['success_data'] = {
-                    'title': 'Cash Booking Created Successfully!',
-                    'message': f"Cash Booking {booking_number} has been created successfully!",
-                    'created_item_number': booking_number,
-                    'module_name': 'bookings'
-                }
-                st.rerun()
-            else:
-                st.error("❌ Failed to save cash booking. Please try again.")
-        except Exception as e:
-            st.error(f"❌ Error creating cash booking: {str(e)}")
+    st.info("📋 Cash booking uses the same simplified form as regular booking.")
+    create_booking()
 
 def view_bookings():
     """View and manage existing simplified bookings"""
@@ -460,7 +284,7 @@ def view_bookings():
                     st.write(f"**Customer:** {booking.get('customer', 'N/A')}")
                     st.write(f"**Date:** {booking.get('booking_date', 'N/A')}")
                     st.write(f"**Vehicle Type:** {booking.get('vehicle_type', 'N/A')}")
-                    st.write(f"**Route:** {booking.get('route_from', 'N/A')} → {booking.get('route_to', 'N/A')}")
+                    st.write(f"**Route:** {booking.get('route_from', 'N/A')} to {booking.get('route_to', 'N/A')}")
                     
                 with detail_col2:
                     st.markdown("**🚛 VEHICLE & DRIVER DETAILS**")
@@ -518,8 +342,8 @@ def view_bookings():
                         new_vehicle_type = st.selectbox("Vehicle Type", ["7ft", "8ft", "12ft", "14ft", "17ft", "20ft", "24ft", "32ft"], 
                                                       index=["7ft", "8ft", "12ft", "14ft", "17ft", "20ft", "24ft", "32ft"].index(booking.get('vehicle_type', '7ft')) if booking.get('vehicle_type') in ["7ft", "8ft", "12ft", "14ft", "17ft", "20ft", "24ft", "32ft"] else 0,
                                                       key=f"edit_vehicle_type_{booking_id}")
-                        new_pickup_location = st.text_input("Pick up", value=booking.get('route_from', ''), key=f"edit_pickup_{booking_id}")
-                        new_destination = st.text_input("Destination", value=booking.get('route_to', ''), key=f"edit_destination_{booking_id}")
+                        new_route_from = st.text_input("Route From", value=booking.get('route_from', ''), key=f"edit_route_from_{booking_id}")
+                        new_route_to = st.text_input("Route To", value=booking.get('route_to', ''), key=f"edit_route_to_{booking_id}")
                     
                     with edit_col2:
                         new_vehicle_reg = st.text_input("Vehicle Reg No", value=booking.get('vehicle_reg_no', ''), key=f"edit_vehicle_reg_{booking_id}")
@@ -539,8 +363,8 @@ def view_bookings():
                                     st.session_state.bookings[i].update({
                                         'customer': new_customer,
                                         'vehicle_type': new_vehicle_type,
-                                        'route_from': new_pickup_location,
-                                        'route_to': new_destination,
+                                        'route_from': new_route_from,
+                                        'route_to': new_route_to,
                                         'vehicle_reg_no': new_vehicle_reg,
                                         'driver': new_driver,
                                         'driver_phone': new_driver_phone,
@@ -554,8 +378,8 @@ def view_bookings():
                             update_simplified_booking(booking_id, {
                                 'customer': new_customer,
                                 'vehicle_type': new_vehicle_type,
-                                'route_from': new_pickup_location,
-                                'route_to': new_destination,
+                                'route_from': new_route_from,
+                                'route_to': new_route_to,
                                 'vehicle_reg_no': new_vehicle_reg,
                                 'driver': new_driver,
                                 'driver_phone': new_driver_phone,

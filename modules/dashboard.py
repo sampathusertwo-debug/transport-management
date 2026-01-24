@@ -94,13 +94,14 @@ def calculate_dashboard_metrics(from_date, to_date):
     
     # Calculate metrics
     total_bookings = len(filtered_bookings)
-    total_revenue = sum(booking['total_amount'] for booking in filtered_bookings)
+    # For simplified bookings, we don't track total_amount, so calculate from invoices instead
+    total_revenue = sum(invoice.get('total_amount', invoice.get('net_amount', 0)) for invoice in filtered_invoices)
     total_receipts = sum(payment.get('payment_amount', payment.get('amount', 0)) for payment in filtered_payments)
     
     # Calculate pending billings (bookings that are delivered but not invoiced)
     pending_billings = len([
         b for b in filtered_bookings 
-        if b.get('status') in ['Delivered', 'POD Generated'] and 
+        if b.get('status') in ['DELIVERED', 'POD Generated'] and 
         not any(i.get('booking_id') == b.get('id') for i in invoices_data)
     ])
     
@@ -165,19 +166,21 @@ def display_recent_bookings_table(from_date, to_date):
     for booking in recent_bookings:
         # Format status with styling
         status = booking.get('status', 'Created')
-        if status == 'Delivered':
-            status_html = '<span class="status-delivered">Delivered</span>'
-        elif status == 'Dispatched':
-            status_html = '<span class="status-dispatched">Dispatched</span>'
+        if status == 'DELIVERED':
+            status_html = '<span class="status-delivered">DELIVERED</span>'
+        elif status == 'DISPATCHED':
+            status_html = '<span class="status-dispatched">DISPATCHED</span>'
+        elif status == 'CONFIRMED':
+            status_html = '<span class="status-confirmed">CONFIRMED</span>'
         else:
             status_html = status
             
         booking_data.append({
             'Booking #': booking['booking_number'],
-            'Customer': booking['customer_name'],
+            'Customer': booking.get('customer', 'N/A'),
             'Status': status_html,
-            'Amount': f"₹{booking['total_amount']:,.0f}",
-            'Date': booking.get('pickup_date', datetime.date.today()).strftime('%d-%b-%Y') if isinstance(booking.get('pickup_date'), datetime.date) else str(booking.get('pickup_date', ''))
+            'Route': f"{booking.get('route_from', 'N/A')} → {booking.get('route_to', 'N/A')}",
+            'Date': booking.get('booking_date', datetime.date.today()).strftime('%d-%b-%Y') if isinstance(booking.get('booking_date'), datetime.date) else str(booking.get('booking_date', ''))
         })
     
     if booking_data:
@@ -363,22 +366,20 @@ def display_detailed_data(from_date, to_date):
             booking_data = []
             for booking in recent_bookings:
                 status_color = {
-                    'Created': '🟡',
-                    'Confirmed': '🔵',
-                    'Dispatched': '🟠',
-                    'In Transit': '🟣',
-                    'Delivered': '🟢',
-                    'POD Captured': '✅',
-                    'Cancelled': '❌'
-                }.get(booking.get('status', 'Created'), '⚪')
+                    'CREATED': '🟡',
+                    'CONFIRMED': '🔵',
+                    'DISPATCHED': '🟠',
+                    'DELIVERED': '🟢',
+                    'CANCELLED': '❌'
+                }.get(booking.get('status', 'CREATED'), '⚪')
                 
                 booking_data.append({
                     'Status': f"{status_color} {booking.get('status', 'Created')}",
                     'Booking Number': booking.get('booking_number', 'N/A'),
-                    'Customer': booking.get('customer_name', 'N/A'),
-                    'Route': f"{booking.get('pickup_location', 'N/A')} → {booking.get('delivery_location', 'N/A')}",
-                    'Pickup Date': safe_get_date(booking.get('pickup_date', datetime.datetime.now())).strftime('%d-%b-%Y'),
-                    'Amount': f"₹{booking.get('total_amount', 0):,.2f}"
+                    'Customer': booking.get('customer', 'N/A'),
+                    'Route': f"{booking.get('route_from', 'N/A')} → {booking.get('route_to', 'N/A')}",
+                    'Date': safe_get_date(booking.get('booking_date', datetime.datetime.now())).strftime('%d-%b-%Y'),
+                    'Vehicle': booking.get('vehicle_type', 'N/A')
                 })
             
             df_bookings = pd.DataFrame(booking_data)

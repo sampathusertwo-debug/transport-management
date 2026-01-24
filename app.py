@@ -16,6 +16,78 @@ def save_booking(booking_data):
     """Save booking to database"""
     return save_to_database('bookings', booking_data)
 
+def save_simplified_booking(booking_data):
+    """Save simplified booking to database with proper field mapping"""
+    # Map the simplified booking data to database fields
+    simplified_booking = {
+        'id': booking_data.get('id'),
+        'booking_number': booking_data.get('booking_number'),
+        'customer': booking_data.get('customer'),
+        'booking_date': booking_data.get('booking_date'),
+        'vehicle_type': booking_data.get('vehicle_type'),
+        'route_from': booking_data.get('route_from'),
+        'route_to': booking_data.get('route_to'),
+        'vehicle_reg_no': booking_data.get('vehicle_reg_no'),
+        'driver': booking_data.get('driver'),
+        'driver_phone': booking_data.get('driver_phone'),
+        'status': booking_data.get('status', 'CREATED'),
+        'created_date': booking_data.get('created_date'),
+        'last_modified': booking_data.get('last_modified')
+    }
+    return save_to_database('bookings', simplified_booking)
+
+def save_simplified_quotation(quotation_data):
+    """Save simplified quotation to database with proper field mapping"""
+    # Map the simplified quotation data to database fields
+    simplified_quotation = {
+        'id': quotation_data.get('id'),
+        'quotation_number': quotation_data.get('quotation_number'),
+        'customer': quotation_data.get('customer'),
+        'quotation_date': quotation_data.get('quotation_date'),
+        'vehicle_type': quotation_data.get('vehicle_type'),
+        'route_from': quotation_data.get('route_from'),
+        'route_to': quotation_data.get('route_to'),
+        'vehicle_reg_no': quotation_data.get('vehicle_reg_no'),
+        'driver': quotation_data.get('driver'),
+        'driver_phone': quotation_data.get('driver_phone'),
+        'status': quotation_data.get('status', 'CREATED'),
+        'created_date': quotation_data.get('created_date'),
+        'last_modified': quotation_data.get('last_modified')
+    }
+    return save_to_database('quotations', simplified_quotation)
+
+def update_simplified_booking(booking_id, booking_data):
+    """Update simplified booking in database"""
+    # Map the simplified booking data to database fields
+    simplified_booking = {
+        'customer': booking_data.get('customer'),
+        'vehicle_type': booking_data.get('vehicle_type'),
+        'route_from': booking_data.get('route_from'),
+        'route_to': booking_data.get('route_to'),
+        'vehicle_reg_no': booking_data.get('vehicle_reg_no'),
+        'driver': booking_data.get('driver'),
+        'driver_phone': booking_data.get('driver_phone'),
+        'status': booking_data.get('status'),
+        'last_modified': datetime.datetime.now()
+    }
+    return update_in_database('bookings', simplified_booking, booking_id)
+
+def update_simplified_quotation(quotation_id, quotation_data):
+    """Update simplified quotation in database"""
+    # Map the simplified quotation data to database fields
+    simplified_quotation = {
+        'customer': quotation_data.get('customer'),
+        'vehicle_type': quotation_data.get('vehicle_type'),
+        'route_from': quotation_data.get('route_from'),
+        'route_to': quotation_data.get('route_to'),
+        'vehicle_reg_no': quotation_data.get('vehicle_reg_no'),
+        'driver': quotation_data.get('driver'),
+        'driver_phone': quotation_data.get('driver_phone'),
+        'status': quotation_data.get('status'),
+        'last_modified': datetime.datetime.now()
+    }
+    return update_in_database('quotations', simplified_quotation, quotation_id)
+
 def save_customer(customer_data):
     """Save customer to database"""
     return save_to_database('customers', customer_data)
