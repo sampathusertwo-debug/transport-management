@@ -472,13 +472,13 @@ def view_bookings():
                 from .utils import format_booking_details
                 booking_text = format_booking_details(booking)
                 
-                if st.button(f"📋 Copy to Clipboard", key=f"copy_{booking.get('id', booking.get('booking_number'))}", use_container_width=True):
-                    import pyperclip
+                if st.button("📋 Copy to Clipboard", key=f"copy_btn_{booking.get('id', booking.get('booking_number'))}", help="Copy booking details to clipboard"):
                     try:
+                        import pyperclip
                         pyperclip.copy(booking_text)
                         st.success("✅ Copied to clipboard!")
-                    except:
-                        st.info("📋 Copy functionality not available")
+                    except Exception as e:
+                        st.error(f"Failed to copy: {str(e)}")
                 
                 # Action buttons
                 st.markdown("---")
