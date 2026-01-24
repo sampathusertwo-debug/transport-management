@@ -102,25 +102,26 @@ def validate_mobile_number(phone):
     # Remove any spaces or hyphens
     phone = re.sub(r'[\s\-]', '', phone)
     # Check if it's exactly 10 digits and starts with 6-9
-    return re.match(r'^[6-9]\d{9}$', phone) is not None
+    return re.match(r'^\d{10}$', phone) is not None
 
 
 def format_booking_details(booking):
     """Format booking details as text for copying to clipboard"""
     details = []
-    details.append("📋 BOOKING DETAILS\n")
+    details.append("S TRANZ LOGISTICS")
+    details.append("BOOKING CONFIRMATION\n")
+    details.append("📋 BOOKING DETAILS")
     details.append(f"Booking No: {booking.get('booking_number', 'N/A')}")
     details.append(f"Customer: {booking.get('customer', 'N/A')}")
     details.append(f"Date: {booking.get('booking_date', 'N/A')}")
     details.append(f"Vehicle Type: {booking.get('vehicle_type', 'N/A')}")
     route_display = f"{booking.get('route_from', 'N/A')} → {booking.get('route_to', 'N/A')}"
     details.append(f"Route: {route_display}")
-    details.append("\n🚛 VEHICLE & DRIVER DETAILS\n")
+    details.append("\n🚛 VEHICLE & DRIVER DETAILS")
     details.append(f"Reg No: {booking.get('vehicle_reg_no', 'Not assigned')}")
     details.append(f"Driver: {booking.get('driver', 'Not assigned')}")
     details.append(f"Phone: {booking.get('driver_phone', 'Not provided')}")
     details.append(f"STATUS: {booking.get('status', 'CREATED')}")
-    details.append(f"Created: {booking.get('created_date', 'N/A')}")
     
     return "\n".join(details)
 
@@ -128,19 +129,20 @@ def format_booking_details(booking):
 def format_quotation_details(quotation):
     """Format quotation details as text for copying to clipboard"""
     details = []
-    details.append("📋 QUOTATION DETAILS\n")
+    details.append("S TRANZ LOGISTICS")
+    details.append("BOOKING CONFIRMATION\n")
+    details.append("📋 QUOTATION DETAILS")
     details.append(f"Quotation No: {quotation.get('quotation_number', 'N/A')}")
     details.append(f"Customer: {quotation.get('customer', 'N/A')}")
     details.append(f"Date: {quotation.get('quotation_date', 'N/A')}")
     details.append(f"Vehicle Type: {quotation.get('vehicle_type', 'N/A')}")
     route_display = f"{quotation.get('route_from', 'N/A')} → {quotation.get('route_to', 'N/A')}"
     details.append(f"Route: {route_display}")
-    details.append("\n🚛 VEHICLE & DRIVER DETAILS\n")
+    details.append("\n🚛 VEHICLE & DRIVER DETAILS")
     details.append(f"Reg No: {quotation.get('vehicle_reg_no', 'Not assigned')}")
     details.append(f"Driver: {quotation.get('driver', 'Not assigned')}")
     details.append(f"Phone: {quotation.get('driver_phone', 'Not provided')}")
     details.append(f"Status: {quotation.get('status', 'CREATED')}")
-    details.append(f"Created: {quotation.get('created_date', 'N/A')}")
     
     return "\n".join(details)
 

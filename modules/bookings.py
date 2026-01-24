@@ -178,7 +178,7 @@ def create_booking():
             selected_driver_data = next((d for d in st.session_state.drivers if d['name'] == selected_driver), None) if selected_driver != "None" else None
             driver_phone_from_master = selected_driver_data.get('phone', '') if selected_driver_data else ''
         else:
-            driver = st.text_input("Driver", placeholder="e.g., Nithish", key="booking_driver_manual")
+            driver = st.text_input("Driver", placeholder="e.g., Driver Name", key="booking_driver_manual")
             driver_phone_from_master = ""
     
     with col2:
@@ -195,7 +195,7 @@ def create_booking():
                     st.session_state['booking_driver_phone'] = new_phone
                     st.session_state[f'last_booking_driver'] = current_driver
         
-        driver_phone = st.text_input("Driver Phone", placeholder="e.g., +91 7339X XXXXX", key="booking_driver_phone")
+        driver_phone = st.text_input("Driver Phone", placeholder="e.g., 7339X XXXXX", key="booking_driver_phone")
         status = st.selectbox("Status", ["CREATED", "CONFIRMED", "DISPATCHED", "DELIVERED", "CANCELLED"], 
                              index=1, key="booking_status")  # Default to CONFIRMED
     
@@ -204,6 +204,11 @@ def create_booking():
         # Validation
         if not customer or not booking_date or not vehicle_type or not pickup_location or not destination:
             st.error("❌ Please fill all required fields marked with *")
+            return
+        
+        # Validate driver phone if provided
+        if driver_phone and not validate_mobile_number(driver_phone):
+            st.error("❌ Driver phone must be a valid 10-digit number (starting with 6-9)")
             return
         
         # Create booking data
@@ -391,6 +396,10 @@ def view_bookings():
     """View and manage existing simplified bookings"""
     st.subheader("📋 View Bookings")
     
+    # Refresh bookings from database
+    from database import get_cached_data
+    st.session_state.bookings = get_cached_data('bookings', limit=None)
+    
     if not st.session_state.bookings:
         st.info("📝 No bookings found. Create your first booking in the 'Create Booking' tab.")
         return
@@ -472,13 +481,23 @@ def view_bookings():
                 from .utils import format_booking_details
                 booking_text = format_booking_details(booking)
                 
-                if st.button("📋 Copy to Clipboard", key=f"copy_btn_{booking.get('id', booking.get('booking_number'))}", help="Copy booking details to clipboard"):
-                    try:
-                        import pyperclip
-                        pyperclip.copy(booking_text)
-                        st.success("✅ Copied to clipboard!")
-                    except Exception as e:
-                        st.error(f"Failed to copy: {str(e)}")
+                col_copy1, col_copy2 = st.columns([1, 3])
+                with col_copy1:
+                    if st.session_state.get(f"show_copy_{booking.get('id', booking.get('booking_number'))}", False):
+                        if st.button("🙈 Hide", key=f"hide_btn_{booking.get('id', booking.get('booking_number'))}", help="Hide text"):
+                            st.session_state[f"show_copy_{booking.get('id', booking.get('booking_number'))}"] = False
+                            st.rerun()
+                    else:
+                        if st.button("📋 Copy", key=f"copy_btn_{booking.get('id', booking.get('booking_number'))}", help="Click to copy text"):
+                            st.session_state[f"show_copy_{booking.get('id', booking.get('booking_number'))}"] = True
+                            st.rerun()
+                with col_copy2:
+                    copy_placeholder = st.empty()
+                
+                if st.session_state.get(f"show_copy_{booking.get('id', booking.get('booking_number'))}", False):
+                    with copy_placeholder.container():
+                        st.code(booking_text, language="text")
+                        st.success("✅ Select and copy the text above!")
                 
                 # Action buttons
                 st.markdown("---")

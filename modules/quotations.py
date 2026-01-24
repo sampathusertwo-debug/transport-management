@@ -10,7 +10,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.lib.units import inch
 import io
-from .utils import searchable_selectbox, static_selectbox
+from .utils import searchable_selectbox, static_selectbox, validate_mobile_number
 
 def show_quotation_success_page(title, message, created_item_id=None, created_item_number=None, module_name="quotations"):
     """Show success page with navigation options for quotations"""
@@ -283,7 +283,7 @@ def create_quotation():
                     st.session_state['quotation_driver_phone'] = new_phone
                     st.session_state[f'last_quotation_driver'] = current_driver
         
-        driver_phone = st.text_input("Driver Phone", placeholder="e.g., +91 7339X XXXXX", key="quotation_driver_phone")
+        driver_phone = st.text_input("Driver Phone", placeholder="e.g., 7339X XXXXX", key="quotation_driver_phone")
         status = st.selectbox("Status", ["CREATED", "APPROVED", "REJECTED", "CONVERTED"], 
                              index=0, key="quotation_status")  # Default to CREATED
     
@@ -292,6 +292,11 @@ def create_quotation():
         # Validation
         if not customer or not quotation_date or not vehicle_type or not pickup_location or not destination:
             st.error("❌ Please fill all required fields marked with *")
+            return
+        
+        # Validate driver phone if provided
+        if driver_phone and not validate_mobile_number(driver_phone):
+            st.error("❌ Driver phone must be a valid 10-digit number (starting with 6-9)")
             return
         
         # Create quotation data
@@ -345,7 +350,7 @@ def view_quotations():
     """View and manage existing quotations"""
     # Always reload quotations to ensure we have latest data
     from database import get_cached_data
-    st.session_state.quotations = get_cached_data('quotations', limit=100)
+    st.session_state.quotations = get_cached_data('quotations', limit=None)
     
     st.subheader("View Quotations")
     
@@ -415,14 +420,24 @@ def view_quotations():
             from .utils import format_quotation_details
             quotation_text = format_quotation_details(quotation)
             
-            if st.button("📋 Copy to Clipboard", key=f"copy_btn_{quotation.get('id')}", help="Copy quotation details to clipboard"):
-                try:
-                    import pyperclip
-                    pyperclip.copy(quotation_text)
-                    st.success("✅ Copied to clipboard!")
-                except Exception as e:
-                    st.error(f"Failed to copy: {str(e)}")
+            col_copy1, col_copy2 = st.columns([1, 3])
+            with col_copy1:
+                if st.session_state.get(f"show_copy_{quotation.get('id')}", False):
+                    if st.button("🙈 Hide", key=f"hide_btn_{quotation.get('id')}", help="Hide text"):
+                        st.session_state[f"show_copy_{quotation.get('id')}"] = False
+                        st.rerun()
+                else:
+                    if st.button("📋 Copy", key=f"copy_btn_{quotation.get('id')}", help="Click to copy text"):
+                        st.session_state[f"show_copy_{quotation.get('id')}"] = True
+                        st.rerun()
+            with col_copy2:
+                copy_placeholder = st.empty()
             
+            if st.session_state.get(f"show_copy_{quotation.get('id')}", False):
+                with copy_placeholder.container():
+                    st.code(quotation_text, language="text")
+                    st.success("✅ Select and copy the text above!")
+                        
             # Action buttons - adjust based on quotation status
             st.markdown("---")
             if quotation.get('status') in ['CREATED', 'APPROVED']:
