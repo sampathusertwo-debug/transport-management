@@ -294,6 +294,21 @@ def view_bookings():
                     st.write(f"**STATUS:** {booking.get('status', 'CREATED')}")
                     st.write(f"**Created:** {format_datetime(booking.get('created_date'))}")
                 
+                # Copy to clipboard button
+                st.markdown("---")
+                from .utils import format_booking_details
+                booking_text = format_booking_details(booking)
+                
+                copy_col1, copy_col2 = st.columns([1, 5])
+                with copy_col1:
+                    if st.button(f"📋 Copy", key=f"copy_{booking.get('id', booking.get('booking_number'))}", use_container_width=True):
+                        import pyperclip
+                        try:
+                            pyperclip.copy(booking_text)
+                            st.success("✅ Copied to clipboard!")
+                        except:
+                            st.info("📋 Booking details ready to copy")
+                
                 # Action buttons
                 st.markdown("**⚡ Actions:**")
                 action_col1, action_col2, action_col3, action_col4 = st.columns(4)

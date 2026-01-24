@@ -103,3 +103,86 @@ def validate_mobile_number(phone):
     phone = re.sub(r'[\s\-]', '', phone)
     # Check if it's exactly 10 digits and starts with 6-9
     return re.match(r'^[6-9]\d{9}$', phone) is not None
+
+
+def format_booking_details(booking):
+    """Format booking details as text for copying to clipboard"""
+    details = []
+    details.append("📋 BOOKING DETAILS\n")
+    details.append(f"Booking No: {booking.get('booking_number', 'N/A')}")
+    details.append(f"Customer: {booking.get('customer', 'N/A')}")
+    details.append(f"Date: {booking.get('booking_date', 'N/A')}")
+    details.append(f"Vehicle Type: {booking.get('vehicle_type', 'N/A')}")
+    route_display = f"{booking.get('route_from', 'N/A')} → {booking.get('route_to', 'N/A')}"
+    details.append(f"Route: {route_display}")
+    details.append("\n🚛 VEHICLE & DRIVER DETAILS\n")
+    details.append(f"Reg No: {booking.get('vehicle_reg_no', 'Not assigned')}")
+    details.append(f"Driver: {booking.get('driver', 'Not assigned')}")
+    details.append(f"Phone: {booking.get('driver_phone', 'Not provided')}")
+    details.append(f"STATUS: {booking.get('status', 'CREATED')}")
+    details.append(f"Created: {booking.get('created_date', 'N/A')}")
+    
+    return "\n".join(details)
+
+
+def format_quotation_details(quotation):
+    """Format quotation details as text for copying to clipboard"""
+    details = []
+    details.append("📋 QUOTATION DETAILS\n")
+    details.append(f"Quotation No: {quotation.get('quotation_number', 'N/A')}")
+    details.append(f"Customer: {quotation.get('customer', 'N/A')}")
+    details.append(f"Date: {quotation.get('quotation_date', 'N/A')}")
+    details.append(f"Vehicle Type: {quotation.get('vehicle_type', 'N/A')}")
+    route_display = f"{quotation.get('route_from', 'N/A')} → {quotation.get('route_to', 'N/A')}"
+    details.append(f"Route: {route_display}")
+    details.append("\n🚛 VEHICLE & DRIVER DETAILS\n")
+    details.append(f"Reg No: {quotation.get('vehicle_reg_no', 'Not assigned')}")
+    details.append(f"Driver: {quotation.get('driver', 'Not assigned')}")
+    details.append(f"Phone: {quotation.get('driver_phone', 'Not provided')}")
+    details.append(f"Status: {quotation.get('status', 'CREATED')}")
+    details.append(f"Created: {quotation.get('created_date', 'N/A')}")
+    
+    return "\n".join(details)
+
+
+def copy_to_clipboard_button(label, text_to_copy, key=None):
+    """Create a button that copies text to clipboard
+    
+    Args:
+        label (str): Button label
+        text_to_copy (str): Text to copy to clipboard
+        key (str, optional): Unique key for the button
+    """
+    import streamlit as st
+    
+    # JavaScript to copy to clipboard
+    js_code = f"""
+    <script>
+    function copyToClipboard(text) {{
+        navigator.clipboard.writeText(text).then(() => {{
+            alert('Copied to clipboard!');
+        }}).catch(err => {{
+            console.error('Failed to copy: ', err);
+        }});
+    }}
+    </script>
+    """
+    
+    # Create a copy button using custom HTML + JavaScript
+    button_html = f"""
+    <button onclick="copyToClipboard(`{text_to_copy.replace(chr(96), chr(39)).replace(chr(10), '\\n')}`)" 
+            style="padding: 10px 20px; background-color: #0078d4; color: white; border: none; 
+                   border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 14px;">
+        📋 {label}
+    </button>
+    """
+    
+    col1, col2 = st.columns([1, 10])
+    with col1:
+        # Use st.write with unsafe_allow_html for button
+        if st.button(f"📋 {label}", key=key, use_container_width=True):
+            # Store text in session for clipboard
+            st.session_state[f'copy_text_{key}'] = text_to_copy
+            st.success("✅ Copied to clipboard!")
+    
+    return

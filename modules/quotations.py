@@ -410,7 +410,23 @@ def view_quotations():
                 st.write(f"**Date:** {safe_format_date(quotation.get('quotation_date', datetime.date.today()))}")
                 st.write(f"**Created:** {safe_format_date(quotation.get('created_date', datetime.datetime.now()))}")
             
+            # Copy to clipboard button
+            st.markdown("---")
+            from .utils import format_quotation_details
+            quotation_text = format_quotation_details(quotation)
+            
+            copy_col1, copy_col2 = st.columns([1, 5])
+            with copy_col1:
+                if st.button(f"📋 Copy", key=f"copy_{quotation.get('id')}", use_container_width=True):
+                    import pyperclip
+                    try:
+                        pyperclip.copy(quotation_text)
+                        st.success("✅ Copied to clipboard!")
+                    except:
+                        st.info("📋 Quotation details ready to copy")
+            
             # Action buttons - adjust based on quotation status
+            st.markdown("---")
             if quotation.get('status') in ['CREATED', 'APPROVED']:
                 col1, col2, col3 = st.columns(3)
                 

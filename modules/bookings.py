@@ -109,15 +109,12 @@ def show():
     # Handle tab switching from success page
     active_tab_index = 2 if st.session_state.get('active_tab') == "view" else 0
     
-    tab1, tab2, tab3 = st.tabs(["Create Booking", "Cash Booking", "View Bookings"])
+    tab1, tab2 = st.tabs(["Create Booking", "View Bookings"])
     
     with tab1:
         create_booking()
     
     with tab2:
-        create_cash_booking()
-    
-    with tab3:
         view_bookings()
 
 def create_booking():
@@ -470,7 +467,21 @@ def view_bookings():
                     st.write(f"**STATUS:** {booking.get('status', 'CREATED')}")
                     st.write(f"**Created:** {format_datetime(booking.get('created_date'))}")
                 
+                # Copy to clipboard button
+                st.markdown("---")
+                from .utils import format_booking_details
+                booking_text = format_booking_details(booking)
+                
+                if st.button(f"📋 Copy to Clipboard", key=f"copy_{booking.get('id', booking.get('booking_number'))}", use_container_width=True):
+                    import pyperclip
+                    try:
+                        pyperclip.copy(booking_text)
+                        st.success("✅ Copied to clipboard!")
+                    except:
+                        st.info("📋 Copy functionality not available")
+                
                 # Action buttons
+                st.markdown("---")
                 st.markdown("**⚡ Actions:**")
                 action_col1, action_col2, action_col3, action_col4 = st.columns(4)
                 
