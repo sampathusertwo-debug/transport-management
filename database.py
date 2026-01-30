@@ -988,6 +988,8 @@ def fix_database_schema():
             
             # quotations table
             ("quotations", "weight_capacity", "DECIMAL(10,2)"),
+            ("quotations", "base_price", "DECIMAL(10,2)"),
+            ("quotations", "total_amount", "DECIMAL(10,2)"),
             ("quotations", "fuel_surcharge", "DECIMAL(10,2) DEFAULT 0"),
             ("quotations", "airport_pass_charges", "DECIMAL(10,2) DEFAULT 0"),
             ("quotations", "reference_number", "VARCHAR(50)"),
@@ -996,6 +998,7 @@ def fix_database_schema():
             
             # bookings table
             ("bookings", "weight_capacity", "DECIMAL(10,2)"),
+            ("bookings", "price", "DECIMAL(10,2)"),
             ("bookings", "airport_pass_charges", "DECIMAL(10,2) DEFAULT 0"),
             ("bookings", "created_by", "VARCHAR(100) DEFAULT 'Admin'"),
             ("bookings", "can_edit", "BOOLEAN DEFAULT true"),

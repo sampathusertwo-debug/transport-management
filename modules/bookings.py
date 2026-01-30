@@ -6,6 +6,7 @@ import re
 from typing import Dict, List
 from .quotations import safe_get_date
 from .utils import searchable_selectbox, static_selectbox, validate_mobile_number
+from .customer_pricing import get_pricing_for_customer, search_customer_by_name
 
 def show_success_page(title, message, created_item_id=None, created_item_number=None, module_name="bookings"):
     """Show success page with navigation options"""
@@ -173,6 +174,48 @@ def create_booking():
         pickup_location = st.text_input("Pick up*", placeholder="e.g., Mepz", key="booking_pickup")
         destination = st.text_input("Destination*", placeholder="e.g., Airport", key="booking_destination")
     
+    # Pricing lookup section
+    st.markdown("**💰 PRICING**")
+    col_price1, col_price2 = st.columns([3, 1])
+    
+    with col_price1:
+        # Initialize pricing in session state
+        if 'booking_suggested_rate' not in st.session_state:
+            st.session_state.booking_suggested_rate = None
+        
+        # Display pricing if available
+        if st.session_state.booking_suggested_rate:
+            pricing_info = st.session_state.booking_suggested_rate
+            st.info(f"💰 **Suggested Rate: ₹ {pricing_info['rate']:,.2f}**\n\n"
+                   f"📍 Route: {pricing_info.get('origin', pickup_location)} → {pricing_info.get('destination', destination)}\n\n"
+                   f"🚛 Vehicle: {pricing_info.get('vehicle_type', vehicle_type)}\n\n"
+                   f"📊 Source: {pricing_info.get('source', 'Unknown')}")
+    
+    with col_price2:
+        if st.button("🔍 Find Price", key="booking_find_price", help="Search for pricing based on customer, route, and vehicle"):
+            if customer and pickup_location and destination and vehicle_type:
+                # Search for customer
+                customers = search_customer_by_name(customer)
+                customer_id = customers[0]['id'] if customers else None
+                
+                # Get pricing
+                pricing = get_pricing_for_customer(
+                    customer_id,
+                    customer,
+                    pickup_location,
+                    destination,
+                    vehicle_type
+                )
+                
+                if pricing:
+                    st.session_state.booking_suggested_rate = pricing
+                    st.rerun()
+                else:
+                    st.warning("⚠️ No pricing found for this combination")
+                    st.session_state.booking_suggested_rate = None
+            else:
+                st.error("❌ Please fill customer, pickup, destination, and vehicle type first")
+    
     st.markdown("**🚛 VEHICLE & DRIVER DETAILS**")
     col1, col2 = st.columns(2)
     
@@ -253,6 +296,7 @@ def create_booking():
             'vehicle_type': vehicle_type,
             'route_from': pickup_location,
             'route_to': destination,
+            'price': price,
             'vehicle_reg_no': vehicle_reg_no,
             'driver': driver,
             'driver_phone': driver_phone,
@@ -340,6 +384,30 @@ def create_cash_booking():
         pickup_location = st.text_input("Pick up*", placeholder="e.g., Mepz", key="cash_booking_pickup")
         destination = st.text_input("Destination*", placeholder="e.g., Airport", key="cash_booking_destination")
     
+    # Price input field
+    price_col1, price_col2, price_col3 = st.columns([2, 1, 1])
+    
+    with price_col1:
+        price = st.number_input(
+            "Price* (₹)",
+            min_value=0.0,
+            step=100.0,
+            value=float(st.session_state.booking_suggested_rate['rate']) if st.session_state.booking_suggested_rate else 0.0,
+            key="booking_price",
+            help="Enter the booking price"
+        )
+    
+    with price_col2:
+        if st.session_state.booking_suggested_rate:
+            st.caption(f"📊 Suggested: ₹{st.session_state.booking_suggested_rate['rate']:,.0f}")
+    
+    with price_col3:
+        if price > 0 and st.session_state.booking_suggested_rate:
+            diff = price - st.session_state.booking_suggested_rate['rate']
+            diff_pct = (diff / st.session_state.booking_suggested_rate['rate']) * 100 if st.session_state.booking_suggested_rate['rate'] > 0 else 0
+            color = "🟢" if diff == 0 else ("🔴" if diff < 0 else "🟡")
+            st.caption(f"{color} {diff:+.0f} ({diff_pct:+.0f}%)")
+    
     st.markdown("**🚛 VEHICLE & DRIVER DETAILS**")
     col1, col2 = st.columns(2)
     
@@ -414,6 +482,7 @@ def create_cash_booking():
             'vehicle_type': vehicle_type,
             'route_from': pickup_location,
             'route_to': destination,
+            'price': price,
             'vehicle_reg_no': vehicle_reg_no,
             'driver': driver,
             'driver_phone': driver_phone,
@@ -543,6 +612,18 @@ def view_bookings():
                     st.write(f"**Date:** {booking.get('booking_date', 'N/A')}")
                     st.write(f"**Vehicle Type:** {booking.get('vehicle_type', 'N/A')}")
                     st.write(f"**Route:** {booking.get('route_from', 'N/A')} → {booking.get('route_to', 'N/A')}")
+                    booking_price_value = None
+                    for price_key in ['price', 'base_price', 'total_amount', 'amount', 'rate']:
+                        if booking.get(price_key) not in [None, '']:
+                            booking_price_value = booking.get(price_key)
+                            break
+                    if booking_price_value is not None:
+                        try:
+                            st.write(f"**Price:** ₹ {float(booking_price_value):,.2f}")
+                        except (TypeError, ValueError):
+                            st.write(f"**Price:** {booking_price_value}")
+                    else:
+                        st.write("**Price:** N/A")
                     
                 with detail_col2:
                     st.markdown("**🚛 VEHICLE & DRIVER DETAILS**")
@@ -578,7 +659,7 @@ def view_bookings():
                 # Action buttons
                 st.markdown("---")
                 st.markdown("**⚡ Actions:**")
-                action_col1, action_col2, action_col3, action_col4 = st.columns(4)
+                action_col1, action_col2, action_col3 = st.columns(3)
                 
                 with action_col1:
                     if st.button(f"✏️ Edit", key=f"edit_{booking.get('id', booking.get('booking_number'))}"):
@@ -621,10 +702,6 @@ def view_bookings():
                             )
                             update_booking_status(booking, 'CANCELLED')
                             st.rerun()
-                
-                with action_col4:
-                    if st.button(f"📄 Details", key=f"details_{booking.get('id', booking.get('booking_number'))}"):
-                        st.info("Full booking details view can be implemented here")
                 
                 # Edit form
                 booking_id = booking.get('id', booking.get('booking_number'))

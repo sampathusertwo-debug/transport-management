@@ -11,6 +11,7 @@ from reportlab.lib import colors
 from reportlab.lib.units import inch
 import io
 from .utils import searchable_selectbox, static_selectbox, validate_mobile_number
+from .customer_pricing import get_pricing_for_customer, search_customer_by_name
 
 def show_quotation_success_page(title, message, created_item_id=None, created_item_number=None, module_name="quotations"):
     """Show success page with navigation options for quotations"""
@@ -45,6 +46,10 @@ def show_quotation_success_page(title, message, created_item_id=None, created_it
                 del st.session_state['show_quotation_success_page']
             if 'quotation_success_data' in st.session_state:
                 del st.session_state['quotation_success_data']
+            if 'editing_quotation_id' in st.session_state:
+                del st.session_state['editing_quotation_id']
+            if 'editing_quotation_mode' in st.session_state:
+                del st.session_state['editing_quotation_mode']
             # Switch to appropriate tab
             st.session_state.active_quotation_tab = "view"
             st.rerun()
@@ -238,6 +243,76 @@ def create_quotation():
         pickup_location = st.text_input("Pick up*", placeholder="e.g., Mepz", key="quotation_pickup")
         destination = st.text_input("Destination*", placeholder="e.g., Airport", key="quotation_destination")
     
+    # Pricing lookup section
+    st.markdown("**💰 PRICING**")
+    col_price1, col_price2 = st.columns([3, 1])
+    
+    with col_price1:
+        # Initialize pricing in session state
+        if 'quotation_suggested_rate' not in st.session_state:
+            st.session_state.quotation_suggested_rate = None
+        
+        # Display pricing if available
+        if st.session_state.quotation_suggested_rate:
+            pricing_info = st.session_state.quotation_suggested_rate
+            st.info(f"💰 **Suggested Rate: ₹ {pricing_info['rate']:,.2f}**\n\n"
+                   f"📍 Route: {pricing_info.get('origin', pickup_location)} → {pricing_info.get('destination', destination)}\n\n"
+                   f"🚛 Vehicle: {pricing_info.get('vehicle_type', vehicle_type)}\n\n"
+                   f"📊 Source: {pricing_info.get('source', 'Unknown')}")
+            if pricing_info.get('halting_charge') and pricing_info.get('halting_charge') > 0:
+                st.caption(f"⏱️ Halting Charge: ₹ {pricing_info['halting_charge']:,.2f}")
+            if pricing_info.get('unloading_free_time'):
+                st.caption(f"📦 {pricing_info['unloading_free_time']}")
+    
+    with col_price2:
+        if st.button("🔍 Find Price", key="quotation_find_price", help="Search for pricing based on customer, route, and vehicle"):
+            if customer and pickup_location and destination and vehicle_type:
+                # Search for customer
+                customers = search_customer_by_name(customer)
+                customer_id = customers[0]['id'] if customers else None
+                
+                # Get pricing
+                pricing = get_pricing_for_customer(
+                    customer_id,
+                    customer,
+                    pickup_location,
+                    destination,
+                    vehicle_type
+                )
+                
+                if pricing:
+                    st.session_state.quotation_suggested_rate = pricing
+                    st.rerun()
+                else:
+                    st.warning("⚠️ No pricing found for this combination")
+                    st.session_state.quotation_suggested_rate = None
+            else:
+                st.error("❌ Please fill customer, pickup, destination, and vehicle type first")
+    
+    # Price input field
+    price_col1, price_col2, price_col3 = st.columns([2, 1, 1])
+    
+    with price_col1:
+        price = st.number_input(
+            "Price* (₹)",
+            min_value=0.0,
+            step=100.0,
+            value=float(st.session_state.quotation_suggested_rate['rate']) if st.session_state.quotation_suggested_rate else 0.0,
+            key="quotation_price",
+            help="Enter the quotation price"
+        )
+    
+    with price_col2:
+        if st.session_state.quotation_suggested_rate:
+            st.caption(f"📊 Suggested: ₹{st.session_state.quotation_suggested_rate['rate']:,.0f}")
+    
+    with price_col3:
+        if price > 0 and st.session_state.quotation_suggested_rate:
+            diff = price - st.session_state.quotation_suggested_rate['rate']
+            diff_pct = (diff / st.session_state.quotation_suggested_rate['rate']) * 100 if st.session_state.quotation_suggested_rate['rate'] > 0 else 0
+            color = "🟢" if diff == 0 else ("🔴" if diff < 0 else "🟡")
+            st.caption(f"{color} {diff:+.0f} ({diff_pct:+.0f}%)")
+    
     st.markdown("**🚛 VEHICLE & DRIVER DETAILS**")
     col1, col2 = st.columns(2)
     
@@ -318,6 +393,8 @@ def create_quotation():
             'vehicle_type': vehicle_type,
             'route_from': pickup_location,
             'route_to': destination,
+            'base_price': price,
+            'total_amount': price,
             'vehicle_reg_no': vehicle_reg_no,
             'driver': driver,
             'driver_phone': driver_phone,
@@ -378,8 +455,11 @@ def view_quotations():
     
     # Check if we're in edit mode
     if st.session_state.get('editing_quotation_id'):
-        edit_quotation()
-        return
+        if not st.session_state.get('editing_quotation_mode'):
+            del st.session_state['editing_quotation_id']
+        else:
+            edit_quotation()
+            return
     
     # Always reload quotations to ensure we have latest data
     from database import get_cached_data
@@ -439,6 +519,18 @@ def view_quotations():
                 st.write(f"**Customer:** {quotation.get('customer', 'N/A')}")
                 st.write(f"**Route:** {route_display}")
                 st.write(f"**Vehicle Type:** {quotation.get('vehicle_type', 'N/A')}")
+                quotation_price_value = None
+                for price_key in ['base_price', 'price', 'total_amount', 'amount', 'rate']:
+                    if quotation.get(price_key) not in [None, '']:
+                        quotation_price_value = quotation.get(price_key)
+                        break
+                if quotation_price_value is not None:
+                    try:
+                        st.write(f"**Price:** ₹ {float(quotation_price_value):,.2f}")
+                    except (TypeError, ValueError):
+                        st.write(f"**Price:** {quotation_price_value}")
+                else:
+                    st.write("**Price:** N/A")
                 st.write(f"**Vehicle Reg No:** {quotation.get('vehicle_reg_no', 'N/A')}")
                 st.write(f"**Driver:** {quotation.get('driver', 'N/A')}")
             
@@ -479,6 +571,7 @@ def view_quotations():
                 with col1:
                     if st.button(f"✏️ Edit", key=f"edit_{quotation['id']}"):
                         st.session_state.editing_quotation_id = quotation['id']
+                        st.session_state.editing_quotation_mode = True
                         st.rerun()
                 
                 with col2:
@@ -509,6 +602,7 @@ def view_quotations():
                 with col2:
                     if st.button(f"✏️ Revise", key=f"revise_{quotation['id']}", help="Create a revised version of this quotation"):
                         st.session_state.editing_quotation_id = quotation['id']
+                        st.session_state.editing_quotation_mode = True
                         st.session_state.revise_mode = True
                         st.rerun()
                 
@@ -545,6 +639,8 @@ def edit_quotation():
         st.error("Quotation not found!")
         if st.button("Back to Quotations"):
             del st.session_state['editing_quotation_id']
+            if 'editing_quotation_mode' in st.session_state:
+                del st.session_state['editing_quotation_mode']
             st.rerun()
         return
     
@@ -644,6 +740,8 @@ def edit_quotation():
                     
                     # Clear edit mode and rerun
                     del st.session_state['editing_quotation_id']
+                    if 'editing_quotation_mode' in st.session_state:
+                        del st.session_state['editing_quotation_mode']
                     st.rerun()
                 else:
                     st.error("❌ Failed to update quotation. Please try again.")
@@ -663,6 +761,8 @@ def edit_quotation():
                 notes=f"Edit cancelled for quotation {quotation['quotation_number']}"
             )
             del st.session_state['editing_quotation_id']
+            if 'editing_quotation_mode' in st.session_state:
+                del st.session_state['editing_quotation_mode']
             st.rerun()
     
     with col3:
@@ -685,6 +785,8 @@ def edit_quotation():
                 )
                 
                 del st.session_state['editing_quotation_id']
+                if 'editing_quotation_mode' in st.session_state:
+                    del st.session_state['editing_quotation_mode']
                 st.rerun()
             except Exception as e:
                 st.error(f"Error deleting quotation: {str(e)}")

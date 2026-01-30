@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 import uuid
 
 # Import modules
-from modules import quotations, bookings, invoicing, customer_payments, vendor_management, company_expenses, vehicle_master, dashboard, audit_exports, notes, user_management
+from modules import quotations, bookings, invoicing, customer_payments, vendor_management, company_expenses, vehicle_master, dashboard, audit_exports, notes, user_management, pricing_management_ui
 
 # Import database functions
 from database import init_database, execute_query, get_next_counter_value, save_to_database, update_in_database, refresh_data
@@ -27,6 +27,7 @@ def save_simplified_booking(booking_data):
         'vehicle_type': booking_data.get('vehicle_type'),
         'route_from': booking_data.get('route_from'),
         'route_to': booking_data.get('route_to'),
+        'price': booking_data.get('price'),
         'vehicle_reg_no': booking_data.get('vehicle_reg_no'),
         'driver': booking_data.get('driver'),
         'driver_phone': booking_data.get('driver_phone'),
@@ -47,6 +48,8 @@ def save_simplified_quotation(quotation_data):
         'vehicle_type': quotation_data.get('vehicle_type'),
         'route_from': quotation_data.get('route_from'),
         'route_to': quotation_data.get('route_to'),
+        'base_price': quotation_data.get('base_price'),
+        'total_amount': quotation_data.get('total_amount'),
         'vehicle_reg_no': quotation_data.get('vehicle_reg_no'),
         'driver': quotation_data.get('driver'),
         'driver_phone': quotation_data.get('driver_phone'),
@@ -71,6 +74,8 @@ def update_simplified_booking(booking_id, booking_data):
         simplified_booking['route_from'] = booking_data['route_from']
     if 'route_to' in booking_data:
         simplified_booking['route_to'] = booking_data['route_to']
+    if 'price' in booking_data:
+        simplified_booking['price'] = booking_data['price']
     if 'vehicle_reg_no' in booking_data:
         simplified_booking['vehicle_reg_no'] = booking_data['vehicle_reg_no']
     if 'driver' in booking_data:
@@ -100,6 +105,10 @@ def update_simplified_quotation(quotation_id, quotation_data):
         simplified_quotation['route_from'] = quotation_data['route_from']
     if 'route_to' in quotation_data:
         simplified_quotation['route_to'] = quotation_data['route_to']
+    if 'base_price' in quotation_data:
+        simplified_quotation['base_price'] = quotation_data['base_price']
+    if 'total_amount' in quotation_data:
+        simplified_quotation['total_amount'] = quotation_data['total_amount']
     if 'vehicle_reg_no' in quotation_data:
         simplified_quotation['vehicle_reg_no'] = quotation_data['vehicle_reg_no']
     if 'driver' in quotation_data:
@@ -899,6 +908,7 @@ def main():
             ("Vendor Management", "🚛"),
             ("Company Expenses", "💸"),
             ("Vehicle Master", "🚗"),
+            ("Pricing Management", "💰"),
             ("Notes & Tracking", "📝"),
             ("Audit Exports", "📤")
         ]
@@ -929,6 +939,8 @@ def main():
         company_expenses.show()
     elif page == "Vehicle Master":
         vehicle_master.show()
+    elif page == "Pricing Management":
+        pricing_management_ui.pricing_management_page()
     elif page == "Notes & Tracking":
         notes.show()
     elif page == "Audit Exports":

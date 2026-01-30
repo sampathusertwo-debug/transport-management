@@ -888,8 +888,90 @@ def manage_customers():
     """Manage customer records - view, edit, delete"""
     st.subheader("Manage Customers")
     
+    # Add section for creating new customer
+    st.markdown("---")
+    create_col, spacer = st.columns([1, 4])
+    
+    with create_col:
+        if st.button("➕ Create New Customer", key="btn_create_new_customer", use_container_width=True):
+            st.session_state.show_create_customer_form = True
+    
+    # Show create customer form if needed
+    if st.session_state.get("show_create_customer_form", False):
+        st.markdown("### ➕ Create New Customer")
+        
+        create_customer_form = st.form("create_new_customer_form")
+        
+        with create_customer_form:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                new_customer_name = st.text_input("Customer Name*", placeholder="e.g., ABC Logistics", key="new_cust_name")
+                new_customer_phone = st.text_input("Phone", placeholder="e.g., 9876543210", key="new_cust_phone")
+                new_customer_email = st.text_input("Email", placeholder="e.g., contact@company.com", key="new_cust_email")
+            
+            with col2:
+                new_customer_address = st.text_area("Address", placeholder="e.g., 123 Main Street, City", key="new_cust_address", height=100)
+                new_customer_gst = st.text_input("GST Number", placeholder="e.g., 33AABCT1234H1Z0", key="new_cust_gst")
+                new_customer_pan = st.text_input("PAN Number", placeholder="e.g., AAATL5055K", key="new_cust_pan")
+                new_customer_payment_terms = st.selectbox("Payment Terms (Days)", options=[15, 30, 45, 60, 90], key="new_cust_terms", index=1)
+            
+            form_col1, form_col2 = st.columns(2)
+            
+            with form_col1:
+                submit_btn = st.form_submit_button("✅ Create Customer", type="primary", use_container_width=True)
+            
+            with form_col2:
+                cancel_btn = st.form_submit_button("❌ Cancel", use_container_width=True)
+        
+        if submit_btn:
+            if new_customer_name:
+                # Validate phone number if provided
+                from .utils import validate_mobile_number
+                
+                if new_customer_phone and not validate_mobile_number(new_customer_phone):
+                    st.error("❌ Phone must be a valid 10-digit number (starting with 6-9)")
+                else:
+                    # Create new customer
+                    from database import execute_query
+                    
+                    try:
+                        query = """
+                        INSERT INTO customers (name, email, phone, address, gst_number, pan_number, payment_terms)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        RETURNING id, name, email, phone, address, gst_number, pan_number, payment_terms, created_date;
+                        """
+                        result = execute_query(query, (new_customer_name, new_customer_email, new_customer_phone, 
+                                                       new_customer_address, new_customer_gst, new_customer_pan,
+                                                       new_customer_payment_terms), fetch=True)
+                        
+                        if result:
+                            new_customer = dict(result[0])
+                            new_customer['id'] = str(new_customer['id'])  # Ensure ID is string
+                            
+                            # Add to session state
+                            if not hasattr(st.session_state, 'customers') or st.session_state.customers is None:
+                                st.session_state.customers = []
+                            st.session_state.customers.append(new_customer)
+                            
+                            st.success(f"✅ Customer '{new_customer_name}' created successfully!")
+                            st.session_state.show_create_customer_form = False
+                            st.rerun()
+                        else:
+                            st.error("❌ Failed to create customer in database")
+                    except Exception as e:
+                        st.error(f"❌ Error creating customer: {e}")
+            else:
+                st.error("❌ Customer name is required")
+        
+        if cancel_btn:
+            st.session_state.show_create_customer_form = False
+            st.rerun()
+        
+        st.markdown("---")
+    
     if not st.session_state.customers:
-        st.info("No customers found. Customers are created when bookings or quotations are made.")
+        st.info("No customers found. Use the 'Create New Customer' button above or customers are created when bookings or quotations are made.")
         return
     
     # Get unique customers (avoid duplicates by ID, not name)
