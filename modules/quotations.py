@@ -220,7 +220,17 @@ def create_quotation():
     col1, col2 = st.columns(2)
     
     with col1:
-        customer = st.text_input("Customer*", placeholder="e.g., Fast Logistics", key="quotation_customer")
+        # Load customers from database
+        from database import load_data_when_needed
+        load_data_when_needed('customers')
+        
+        if hasattr(st.session_state, 'customers') and st.session_state.customers:
+            customer_options = [c['name'] for c in st.session_state.customers]
+            customer = searchable_selectbox("Customer*", customer_options, key="quotation_customer", help_text="Select existing customer or add new one in Customers tab")
+        else:
+            st.warning("⚠️ No customers found. Please add customers first in the Customers tab.")
+            customer = st.text_input("Customer* (Manual Entry)", placeholder="e.g., Fast Logistics", key="quotation_customer_manual")
+        
         quotation_date = st.date_input("Date*", value=datetime.datetime.now().date(), key="quotation_date")
         vehicle_type = st.selectbox("Vehicle Type*", ["7ft", "8ft", "12ft", "14ft", "17ft", "20ft", "24ft", "32ft"], key="quotation_vehicle_type")
     
@@ -325,6 +335,23 @@ def create_quotation():
                     st.session_state.quotations = []
                 st.session_state.quotations.insert(0, quotation_data)  # Add at top
                 
+                # Add note for quotation creation
+                from .notes import add_status_note
+                add_status_note(
+                    record_id=quotation_data['id'],
+                    record_type='quotation',
+                    old_status=None,
+                    new_status='CREATED',
+                    changed_by=st.session_state.get('user', 'System'),
+                    notes=f"Quotation created - {quotation_data['customer']}",
+                    additional_data={
+                        'quotation_number': quotation_number,
+                        'customer': quotation_data['customer'],
+                        'pickup': quotation_data.get('route_from', ''),
+                        'destination': quotation_data.get('route_to', '')
+                    }
+                )
+                
                 # Clear form
                 for key in ['quotation_customer', 'quotation_pickup', 'quotation_destination', 
                            'quotation_vehicle', 'quotation_driver_select', 'quotation_driver_phone']:
@@ -348,6 +375,12 @@ def create_quotation():
 
 def view_quotations():
     """View and manage existing quotations"""
+    
+    # Check if we're in edit mode
+    if st.session_state.get('editing_quotation_id'):
+        edit_quotation()
+        return
+    
     # Always reload quotations to ensure we have latest data
     from database import get_cached_data
     st.session_state.quotations = get_cached_data('quotations', limit=None)
@@ -498,6 +531,163 @@ def view_quotations():
             file_name=f"quotations_{datetime.datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv"
         )
+
+def edit_quotation():
+    """Edit an existing quotation"""
+    quotation_id = st.session_state.get('editing_quotation_id')
+    
+    # Get the quotation to edit
+    from database import get_cached_data
+    quotations = get_cached_data('quotations', limit=None)
+    quotation = next((q for q in quotations if q['id'] == quotation_id), None)
+    
+    if not quotation:
+        st.error("Quotation not found!")
+        if st.button("Back to Quotations"):
+            del st.session_state['editing_quotation_id']
+            st.rerun()
+        return
+    
+    st.subheader(f"Edit Quotation - {quotation['quotation_number']}")
+    
+    # Simple quotation edit form
+    st.markdown("**📋 QUOTATION DETAILS**")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        from database import load_data_when_needed
+        load_data_when_needed('customers')
+        
+        if hasattr(st.session_state, 'customers') and st.session_state.customers:
+            customer_options = [c['name'] for c in st.session_state.customers]
+            customer = st.selectbox("Customer*", customer_options, 
+                                  index=customer_options.index(quotation.get('customer', '')) if quotation.get('customer') in customer_options else 0,
+                                  key="edit_quotation_customer")
+        else:
+            customer = st.text_input("Customer*", value=quotation.get('customer', ''), key="edit_quotation_customer")
+        
+        pickup_location = st.text_input("Pickup Location*", value=quotation.get('route_from', ''), key="edit_quotation_pickup")
+        vehicle_type_options = ["7ft", "8ft", "12ft", "14ft", "17ft", "20ft", "24ft", "32ft"]
+        vehicle_type = st.selectbox("Vehicle Type*", 
+                                   vehicle_type_options,
+                                   index=vehicle_type_options.index(quotation.get('vehicle_type', '7ft')) if quotation.get('vehicle_type') in vehicle_type_options else 0,
+                                   key="edit_quotation_vehicle")
+    
+    with col2:
+        destination = st.text_input("Destination*", value=quotation.get('route_to', ''), key="edit_quotation_destination")
+        
+        # Driver selection
+        load_data_when_needed('drivers')
+        drivers = st.session_state.get('drivers', [])
+        if drivers:
+            driver_names = [d['name'] for d in drivers]
+            driver = st.selectbox("Driver*", driver_names,
+                                index=driver_names.index(quotation.get('driver', '')) if quotation.get('driver') in driver_names else 0,
+                                key="edit_quotation_driver_select")
+            
+            # Get driver phone
+            selected_driver = next((d for d in drivers if d['name'] == driver), None)
+            driver_phone = st.text_input("Driver Phone", 
+                                       value=quotation.get('driver_phone', selected_driver.get('phone', '') if selected_driver else ''),
+                                       key="edit_quotation_driver_phone",
+                                       disabled=True)
+        else:
+            driver = st.text_input("Driver", value=quotation.get('driver', ''), key="edit_quotation_driver")
+            driver_phone = st.text_input("Driver Phone", value=quotation.get('driver_phone', ''), key="edit_quotation_driver_phone")
+        
+        vehicle_reg_no = st.text_input("Vehicle Reg No.", value=quotation.get('vehicle_reg_no', ''), key="edit_quotation_vehicle_reg")
+    
+    # Buttons
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("💾 Save Changes", type="primary"):
+            # Validation
+            if not all([customer, pickup_location, destination, vehicle_type, driver, driver_phone]):
+                st.error("❌ Please fill all required fields marked with *")
+                return
+            
+            # Prepare update data
+            updated_quotation = {
+                'customer': customer,
+                'route_from': pickup_location,
+                'route_to': destination,
+                'vehicle_type': vehicle_type,
+                'driver': driver,
+                'driver_phone': driver_phone,
+                'vehicle_reg_no': vehicle_reg_no,
+                'last_modified': datetime.datetime.now()
+            }
+            
+            # Update in database
+            from app import update_simplified_quotation
+            try:
+                if update_simplified_quotation(quotation_id, updated_quotation):
+                    st.success("✅ Quotation updated successfully!")
+                    
+                    # Add note for quotation update
+                    from .notes import add_status_note
+                    add_status_note(
+                        record_id=quotation_id,
+                        record_type='quotation',
+                        old_status=quotation.get('status'),
+                        new_status=quotation.get('status'),
+                        changed_by=st.session_state.get('user', 'System'),
+                        notes=f"Quotation updated - {customer}",
+                        additional_data={
+                            'quotation_number': quotation['quotation_number'],
+                            'customer': customer,
+                            'pickup': pickup_location,
+                            'destination': destination
+                        }
+                    )
+                    
+                    # Clear edit mode and rerun
+                    del st.session_state['editing_quotation_id']
+                    st.rerun()
+                else:
+                    st.error("❌ Failed to update quotation. Please try again.")
+            except Exception as e:
+                st.error(f"❌ Error updating quotation: {str(e)}")
+    
+    with col2:
+        if st.button("❌ Cancel", key="edit_cancel"):
+            # Add note for edit cancellation
+            from .notes import add_status_note
+            add_status_note(
+                record_id=quotation_id,
+                record_type='quotation',
+                old_status=quotation.get('status'),
+                new_status=quotation.get('status'),
+                changed_by=st.session_state.get('user', 'System'),
+                notes=f"Edit cancelled for quotation {quotation['quotation_number']}"
+            )
+            del st.session_state['editing_quotation_id']
+            st.rerun()
+    
+    with col3:
+        if st.button("🗑️ Delete", key="edit_delete"):
+            # Delete quotation
+            from database import execute_query
+            try:
+                execute_query(f"DELETE FROM quotations WHERE id = %s", (quotation_id,))
+                st.success("Quotation deleted successfully!")
+                
+                # Add note for quotation deletion
+                from .notes import add_status_note
+                add_status_note(
+                    record_id=quotation_id,
+                    record_type='quotation',
+                    old_status=quotation.get('status'),
+                    new_status='DELETED',
+                    changed_by=st.session_state.get('user', 'System'),
+                    notes=f"Quotation deleted - {quotation['quotation_number']}"
+                )
+                
+                del st.session_state['editing_quotation_id']
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error deleting quotation: {str(e)}")
 
 def manage_customers():
     """Manage customer information"""

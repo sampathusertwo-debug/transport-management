@@ -106,15 +106,38 @@ def show():
     
     st.header("📦 Bookings Management")
     
-    # Handle tab switching from success page
-    active_tab_index = 2 if st.session_state.get('active_tab') == "view" else 0
+    # Initialize tab selection in session state
+    if 'booking_tab_selection' not in st.session_state:
+        st.session_state.booking_tab_selection = 0
     
-    tab1, tab2 = st.tabs(["Create Booking", "View Bookings"])
+    # Handle navigation from success page
+    if st.session_state.get('active_tab') == "view":
+        st.session_state.booking_tab_selection = 1
+        del st.session_state['active_tab']
     
-    with tab1:
+    # Create custom tab-like buttons
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("➕ Create Booking", 
+                    type="primary" if st.session_state.booking_tab_selection == 0 else "secondary",
+                    use_container_width=True):
+            st.session_state.booking_tab_selection = 0
+            st.rerun()
+    
+    with col2:
+        if st.button("📋 View Bookings", 
+                    type="primary" if st.session_state.booking_tab_selection == 1 else "secondary",
+                    use_container_width=True):
+            st.session_state.booking_tab_selection = 1
+            st.rerun()
+    
+    st.divider()
+    
+    # Show selected content
+    if st.session_state.booking_tab_selection == 0:
         create_booking()
-    
-    with tab2:
+    else:
         view_bookings()
 
 def create_booking():
@@ -132,7 +155,17 @@ def create_booking():
     col1, col2 = st.columns(2)
     
     with col1:
-        customer = st.text_input("Customer*", placeholder="e.g., Fast Logistics", key="booking_customer")
+        # Load customers from database
+        from database import load_data_when_needed
+        load_data_when_needed('customers')
+        
+        if hasattr(st.session_state, 'customers') and st.session_state.customers:
+            customer_options = [c['name'] for c in st.session_state.customers]
+            customer = searchable_selectbox("Customer*", customer_options, key="booking_customer", help_text="Select existing customer or add new one in Quotations > Customers tab")
+        else:
+            st.warning("⚠️ No customers found. Please add customers first in Quotations > Customers tab.")
+            customer = st.text_input("Customer* (Manual Entry)", placeholder="e.g., Fast Logistics", key="booking_customer_manual")
+        
         booking_date = st.date_input("Date*", value=datetime.datetime.now().date(), key="booking_date")
         vehicle_type = st.selectbox("Vehicle Type*", ["7ft", "8ft", "12ft", "14ft", "17ft", "20ft", "24ft", "32ft"], key="booking_vehicle_type")
     
@@ -237,6 +270,23 @@ def create_booking():
                     st.session_state.bookings = []
                 st.session_state.bookings.insert(0, booking_data)  # Add at top
                 
+                # Add note for booking creation
+                from .notes import add_status_note
+                add_status_note(
+                    record_id=booking_data['id'],
+                    record_type='booking',
+                    old_status=None,
+                    new_status='CREATED',
+                    changed_by=st.session_state.get('user', 'System'),
+                    notes=f"Booking created - {booking_data['customer']}",
+                    additional_data={
+                        'booking_number': booking_number,
+                        'customer': booking_data['customer'],
+                        'pickup': booking_data.get('route_from', ''),
+                        'destination': booking_data.get('route_to', '')
+                    }
+                )
+                
                 # Clear form
                 for key in ['booking_customer', 'booking_pickup', 'booking_destination', 
                            'booking_vehicle', 'booking_driver_select', 'booking_driver_phone']:
@@ -273,7 +323,16 @@ def create_cash_booking():
     col1, col2 = st.columns(2)
     
     with col1:
-        customer = st.text_input("Customer*", placeholder="e.g., Fast Logistics", key="cash_booking_customer")
+        # Load customers from database
+        from database import load_data_when_needed
+        load_data_when_needed('customers')
+        
+        if hasattr(st.session_state, 'customers') and st.session_state.customers:
+            customer_options = ["Cash Customer (No account)"] + [c['name'] for c in st.session_state.customers]
+            customer = searchable_selectbox("Customer/Vendor*", customer_options, key="cash_customer", help_text="Select customer or use Cash Customer for walk-in")
+        else:
+            customer = st.text_input("Customer/Vendor* (Manual Entry)", placeholder="e.g., Cash Customer Name", key="cash_customer_manual")
+        
         booking_date = st.date_input("Date*", value=datetime.datetime.now().date(), key="cash_booking_date")
         vehicle_type = st.selectbox("Vehicle Type*", ["7ft", "8ft", "12ft", "14ft", "17ft", "20ft", "24ft", "32ft"], key="cash_booking_vehicle_type")
     
@@ -371,6 +430,23 @@ def create_cash_booking():
                 if 'bookings' not in st.session_state:
                     st.session_state.bookings = []
                 st.session_state.bookings.insert(0, booking_data)  # Add at top
+                
+                # Add note for booking creation
+                from .notes import add_status_note
+                add_status_note(
+                    record_id=booking_data['id'],
+                    record_type='booking',
+                    old_status=None,
+                    new_status='CREATED',
+                    changed_by=st.session_state.get('user', 'System'),
+                    notes=f"Booking created - {booking_data['customer']}",
+                    additional_data={
+                        'booking_number': booking_number,
+                        'customer': booking_data['customer'],
+                        'pickup': booking_data.get('route_from', ''),
+                        'destination': booking_data.get('route_to', '')
+                    }
+                )
                 
                 # Clear form
                 for key in ['cash_booking_customer', 'cash_booking_pickup', 'cash_booking_destination', 
@@ -528,6 +604,21 @@ def view_bookings():
                 with action_col3:
                     if current_status not in ['DELIVERED', 'CANCELLED']:
                         if st.button(f"❌ Cancel", key=f"cancel_{booking.get('id', booking.get('booking_number'))}"):
+                            # Add note for booking cancellation
+                            from .notes import add_status_note
+                            add_status_note(
+                                record_id=booking.get('id'),
+                                record_type='booking',
+                                old_status=current_status,
+                                new_status='CANCELLED',
+                                changed_by=st.session_state.get('user', 'System'),
+                                notes=f"Booking cancelled - {booking.get('booking_number')}",
+                                additional_data={
+                                    'booking_number': booking.get('booking_number'),
+                                    'customer': booking.get('customer', 'N/A'),
+                                    'reason': 'User cancelled'
+                                }
+                            )
                             update_booking_status(booking, 'CANCELLED')
                             st.rerun()
                 
@@ -598,6 +689,16 @@ def view_bookings():
                     
                     with edit_action_col2:
                         if st.button(f"❌ Cancel Edit", key=f"cancel_edit_{booking_id}"):
+                            # Add note for edit cancellation
+                            from .notes import add_status_note
+                            add_status_note(
+                                record_id=booking_id,
+                                record_type='booking',
+                                old_status=booking.get('status'),
+                                new_status=booking.get('status'),
+                                changed_by=st.session_state.get('user', 'System'),
+                                notes=f"Edit cancelled for booking {booking.get('booking_number', booking_id)}"
+                            )
                             del st.session_state[f"editing_{booking_id}"]
                             st.rerun()
     

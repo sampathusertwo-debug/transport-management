@@ -251,12 +251,12 @@ def search_records_in_session_state(search_term, record_types=None):
             quotations = st.session_state.get('quotations', [])
             for q in quotations:
                 if (search_term.lower() in q.get('quotation_number', '').lower() or 
-                    search_term.lower() in q.get('customer_name', '').lower()):
+                    search_term.lower() in q.get('customer', '').lower()):
                     results.append({
                         'id': q['id'],
                         'type': 'quotation',
                         'number': q['quotation_number'],
-                        'customer': q['customer_name']
+                        'customer': q.get('customer', 'N/A')
                     })
         
         # Search bookings
@@ -264,12 +264,12 @@ def search_records_in_session_state(search_term, record_types=None):
             bookings = st.session_state.get('bookings', [])
             for b in bookings:
                 if (search_term.lower() in b.get('booking_number', '').lower() or 
-                    search_term.lower() in b.get('customer_name', '').lower()):
+                    search_term.lower() in b.get('customer', '').lower()):
                     results.append({
                         'id': b['id'],
                         'type': 'booking',
                         'number': b['booking_number'],
-                        'customer': b['customer_name']
+                        'customer': b.get('customer', 'N/A')
                     })
         
         # Search invoices
@@ -277,12 +277,12 @@ def search_records_in_session_state(search_term, record_types=None):
             invoices = st.session_state.get('invoices', [])
             for i in invoices:
                 if (search_term.lower() in i.get('invoice_number', '').lower() or 
-                    search_term.lower() in i.get('customer_name', '').lower()):
+                    search_term.lower() in i.get('customer', '').lower()):
                     results.append({
                         'id': i['id'],
                         'type': 'invoice',
                         'number': i['invoice_number'],
-                        'customer': i['customer_name']
+                        'customer': i.get('customer', 'N/A')
                     })
         
     except Exception as e:
@@ -419,7 +419,7 @@ def get_record_info(record_id: str, record_type: str) -> Dict:
         if booking:
             return {
                 'number': booking.get('booking_number', 'N/A'),
-                'customer': booking.get('customer_name', 'N/A'),
+                'customer': booking.get('customer', 'N/A'),
                 'route': f"{booking.get('pickup_location', '')} → {booking.get('delivery_location', '')}",
                 'amount': booking.get('total_amount', 0)
             }
@@ -429,7 +429,7 @@ def get_record_info(record_id: str, record_type: str) -> Dict:
         if quotation:
             return {
                 'number': quotation.get('quotation_number', 'N/A'),
-                'customer': quotation.get('customer_name', 'N/A'),
+                'customer': quotation.get('customer', 'N/A'),
                 'route': f"{quotation.get('pickup_location', '')} → {quotation.get('delivery_location', '')}",
                 'amount': quotation.get('total_amount', 0)
             }
@@ -439,7 +439,7 @@ def get_record_info(record_id: str, record_type: str) -> Dict:
         if invoice:
             return {
                 'number': invoice.get('invoice_number', 'N/A'),
-                'customer': invoice.get('customer_name', 'N/A'),
+                'customer': invoice.get('customer', 'N/A'),
                 'booking': invoice.get('booking_number', 'N/A'),
                 'amount': invoice.get('total_amount', 0)
             }
@@ -818,16 +818,16 @@ def show_status_history_tab():
     # Get records list based on type
     records_list = []
     if record_type == "Booking":
-        records_list = [(b['id'], f"{b['booking_number']} - {b['customer_name']}") 
+        records_list = [(b['id'], f"{b['booking_number']} - {b.get('customer', 'N/A')}") 
                        for b in st.session_state.get('bookings', [])]
     elif record_type == "Quotation":
-        records_list = [(q['id'], f"{q['quotation_number']} - {q['customer_name']}") 
+        records_list = [(q['id'], f"{q['quotation_number']} - {q.get('customer', 'N/A')}") 
                        for q in st.session_state.get('quotations', [])]
     elif record_type == "Invoice":
-        records_list = [(i['id'], f"{i['invoice_number']} - {i['customer_name']}") 
+        records_list = [(i['id'], f"{i['invoice_number']} - {i.get('customer', 'N/A')}") 
                        for i in st.session_state.get('invoices', [])]
     elif record_type == "Vehicle":
-        records_list = [(v['id'], f"{v['registration_number']} - {v.get('make', '')} {v.get('model', '')}") 
+        records_list = [(v['id'], f"{v.get('registration_number', 'N/A')} - {v.get('make', '')} {v.get('model', '')}") 
                        for v in st.session_state.get('vehicles', [])]
     elif record_type == "Bill":
         records_list = [(b['id'], f"{b.get('bill_number', 'N/A')} - {b.get('vendor_name', 'N/A')}") 
@@ -976,13 +976,13 @@ def show_add_manual_note():
     # Get records list
     records_list = []
     if record_type == "Booking":
-        records_list = [(b['id'], f"{b['booking_number']} - {b['customer_name']}", b['status']) 
+        records_list = [(b['id'], f"{b['booking_number']} - {b.get('customer', 'N/A')}", b['status']) 
                        for b in st.session_state.get('bookings', [])]
     elif record_type == "Quotation":
-        records_list = [(q['id'], f"{q['quotation_number']} - {q['customer_name']}", q['status']) 
+        records_list = [(q['id'], f"{q['quotation_number']} - {q.get('customer', 'N/A')}", q['status']) 
                        for q in st.session_state.get('quotations', [])]
     elif record_type == "Invoice":
-        records_list = [(i['id'], f"{i['invoice_number']} - {i['customer_name']}", i['status']) 
+        records_list = [(i['id'], f"{i['invoice_number']} - {i.get('customer', 'N/A')}", i['status']) 
                        for i in st.session_state.get('invoices', [])]
     elif record_type == "Vehicle":
         records_list = [(v['id'], f"{v['registration_number']}", v.get('status', 'Active')) 

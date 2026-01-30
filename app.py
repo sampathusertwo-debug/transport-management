@@ -59,33 +59,59 @@ def save_simplified_quotation(quotation_data):
 def update_simplified_booking(booking_id, booking_data):
     """Update simplified booking in database"""
     # Map the simplified booking data to database fields
-    simplified_booking = {
-        'customer': booking_data.get('customer'),
-        'vehicle_type': booking_data.get('vehicle_type'),
-        'route_from': booking_data.get('route_from'),
-        'route_to': booking_data.get('route_to'),
-        'vehicle_reg_no': booking_data.get('vehicle_reg_no'),
-        'driver': booking_data.get('driver'),
-        'driver_phone': booking_data.get('driver_phone'),
-        'status': booking_data.get('status'),
-        'last_modified': datetime.datetime.now()
-    }
+    # Only include fields that are actually being updated (not None)
+    simplified_booking = {}
+    
+    # Add fields only if they exist in the input data
+    if 'customer' in booking_data and booking_data['customer'] is not None:
+        simplified_booking['customer'] = booking_data['customer']
+    if 'vehicle_type' in booking_data and booking_data['vehicle_type'] is not None:
+        simplified_booking['vehicle_type'] = booking_data['vehicle_type']
+    if 'route_from' in booking_data:
+        simplified_booking['route_from'] = booking_data['route_from']
+    if 'route_to' in booking_data:
+        simplified_booking['route_to'] = booking_data['route_to']
+    if 'vehicle_reg_no' in booking_data:
+        simplified_booking['vehicle_reg_no'] = booking_data['vehicle_reg_no']
+    if 'driver' in booking_data:
+        simplified_booking['driver'] = booking_data['driver']
+    if 'driver_phone' in booking_data:
+        simplified_booking['driver_phone'] = booking_data['driver_phone']
+    if 'status' in booking_data:
+        simplified_booking['status'] = booking_data['status']
+    
+    # Always update last_modified
+    simplified_booking['last_modified'] = datetime.datetime.now()
+    
     return update_in_database('bookings', simplified_booking, booking_id)
 
 def update_simplified_quotation(quotation_id, quotation_data):
     """Update simplified quotation in database"""
     # Map the simplified quotation data to database fields
-    simplified_quotation = {
-        'customer': quotation_data.get('customer'),
-        'vehicle_type': quotation_data.get('vehicle_type'),
-        'route_from': quotation_data.get('route_from'),
-        'route_to': quotation_data.get('route_to'),
-        'vehicle_reg_no': quotation_data.get('vehicle_reg_no'),
-        'driver': quotation_data.get('driver'),
-        'driver_phone': quotation_data.get('driver_phone'),
-        'status': quotation_data.get('status'),
-        'last_modified': datetime.datetime.now()
-    }
+    # Only include fields that are actually being updated (not None)
+    simplified_quotation = {}
+    
+    # Add fields only if they exist in the input data
+    if 'customer' in quotation_data and quotation_data['customer'] is not None:
+        simplified_quotation['customer'] = quotation_data['customer']
+    if 'vehicle_type' in quotation_data and quotation_data['vehicle_type'] is not None:
+        simplified_quotation['vehicle_type'] = quotation_data['vehicle_type']
+    if 'route_from' in quotation_data:
+        simplified_quotation['route_from'] = quotation_data['route_from']
+    if 'route_to' in quotation_data:
+        simplified_quotation['route_to'] = quotation_data['route_to']
+    if 'vehicle_reg_no' in quotation_data:
+        simplified_quotation['vehicle_reg_no'] = quotation_data['vehicle_reg_no']
+    if 'driver' in quotation_data:
+        simplified_quotation['driver'] = quotation_data['driver']
+    if 'driver_phone' in quotation_data:
+        simplified_quotation['driver_phone'] = quotation_data['driver_phone']
+    if 'status' in quotation_data:
+        simplified_quotation['status'] = quotation_data['status']
+    
+    # Always update last_modified
+    simplified_quotation['last_modified'] = datetime.datetime.now()
+    
     return update_in_database('quotations', simplified_quotation, quotation_id)
 
 def save_customer(customer_data):
