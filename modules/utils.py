@@ -1,4 +1,4 @@
-"""
+﻿"""
 Utility functions shared across all modules
 """
 import streamlit as st
@@ -24,7 +24,7 @@ def searchable_selectbox(label, options, key=None, default_index=0, help_text=No
     
     # Search input
     search_term = st.text_input(
-        f"🔍 Search {label}",
+        f"Search {label}",
         key=search_key,
         help=help_text,
         placeholder=f"Type to filter {label.lower()}..."
@@ -110,7 +110,7 @@ def format_booking_details(booking):
     details = []
     details.append("S TRANZ LOGISTICS")
     details.append("BOOKING CONFIRMATION\n")
-    details.append("📋 BOOKING DETAILS")
+    details.append("BOOKING DETAILS")
     details.append(f"Booking No: {booking.get('booking_number', 'N/A')}")
     details.append(f"Customer: {booking.get('customer', 'N/A')}")
     details.append(f"Date: {booking.get('booking_date', 'N/A')}")
@@ -131,7 +131,7 @@ def format_quotation_details(quotation):
     details = []
     details.append("S TRANZ LOGISTICS")
     details.append("BOOKING CONFIRMATION\n")
-    details.append("📋 QUOTATION DETAILS")
+    details.append("QUOTATION DETAILS")
     details.append(f"Quotation No: {quotation.get('quotation_number', 'N/A')}")
     details.append(f"Customer: {quotation.get('customer', 'N/A')}")
     details.append(f"Date: {quotation.get('quotation_date', 'N/A')}")
@@ -182,9 +182,9 @@ def copy_to_clipboard_button(label, text_to_copy, key=None):
     col1, col2 = st.columns([1, 10])
     with col1:
         # Use st.write with unsafe_allow_html for button
-        if st.button(f"📋 {label}", key=key, use_container_width=True):
+        if st.button(f"{label}", key=key, use_container_width=True):
             # Store text in session for clipboard
             st.session_state[f'copy_text_{key}'] = text_to_copy
-            st.success("✅ Copied to clipboard!")
+            st.success("Copied to clipboard!")
     
     return

@@ -179,8 +179,10 @@ def init_session_state():
         if init_database():
             st.session_state.db_initialized = True
             # Auto-fix schema issues
-            from database import fix_database_schema
+            from database import fix_database_schema, initialize_vehicle_types
             fix_database_schema()
+            # Initialize vehicle types
+            initialize_vehicle_types()
         else:
             st.error("Failed to connect to database")
             st.stop()
@@ -288,7 +290,7 @@ def show_login_page():
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
-        st.markdown("### 🔐 Login to Continue")
+        st.markdown("### Login to Continue")
         
         with st.form("login_form", clear_on_submit=False):
             username = st.text_input("Username", placeholder="Enter your username")
@@ -331,7 +333,7 @@ def show_password_change_form():
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
-        st.markdown("### 🔑 Change Password Required")
+        st.markdown("### Change Password Required")
         st.info("This is your first login. Please change your password to continue.")
         
         if st.session_state.get('temp_password'):
@@ -534,7 +536,7 @@ def main():
     init_session_state()
     
     # Database Management Panel (temporary for schema updates)
-    if st.sidebar.button("🔧 Admin: Reset Database Schema"):
+    if st.sidebar.button("Admin: Reset Database Schema"):
         from database import recreate_database_schema
         with st.spinner("Updating database schema..."):
             if recreate_database_schema():
@@ -557,6 +559,9 @@ def main():
     <style>
     /* Import Google Fonts */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    
+    /* Import Flaticon uicons */
+    @import url('https://cdn-uicons.flaticon.com/2.6.0/uicons-thin-rounded/css/uicons-thin-rounded.css');
     
     /* Global Styles */
     .stApp {
@@ -898,29 +903,70 @@ def main():
         if 'current_page' not in st.session_state:
             st.session_state.current_page = "Dashboard"
         
-        # Navigation buttons
+        # Custom CSS for navigation buttons with icons
+        st.markdown("""
+        <style>
+            .nav-link {
+                display: flex;
+                align-items: center;
+                gap: 0.75rem;
+                padding: 0.75rem 1rem;
+                border-radius: 8px;
+                cursor: pointer;
+                transition: all 0.3s ease;
+                color: #e2e8f0 !important;
+                text-decoration: none;
+                font-weight: 500;
+                font-size: 0.95rem;
+                margin-bottom: 0.5rem;
+                background: transparent;
+            }
+            .nav-link:hover {
+                background: rgba(255,255,255,0.15) !important;
+            }
+            .nav-link.active {
+                background: rgba(255,255,255,0.1) !important;
+            }
+            .nav-link i {
+                font-size: 1.2rem;
+                width: 1.2rem;
+                text-align: center;
+            }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        # Navigation buttons with Flaticon uicons
         pages = [
-            ("Dashboard", "📊"),
-            ("Quotations", "📋"), 
-            ("Bookings", "📦"),
-            ("Invoicing", "🧾"),
-            ("Customer Payments", "💰"),
-            ("Vendor Management", "🚛"),
-            ("Company Expenses", "💸"),
-            ("Vehicle Master", "🚗"),
-            ("Pricing Management", "💰"),
-            ("Notes & Tracking", "📝"),
-            ("Audit Exports", "📤")
+            ("Dashboard", "fi-tr-apps"),
+            ("Quotations", "fi-tr-file-invoice"), 
+            ("Bookings", "fi-tr-calendar-check"),
+            ("Invoicing", "fi-tr-receipt"),
+            ("Customer Payments", "fi-tr-hand-holding-usd"),
+            ("Vendor Management", "fi-tr-users-alt"),
+            ("Company Expenses", "fi-tr-sack-dollar"),
+            ("Vehicle Master", "fi-tr-truck-side"),
+            ("Pricing Management", "fi-tr-tags"),
+            ("Notes & Tracking", "fi-tr-comment-alt-dots"),
+            ("Audit Exports", "fi-tr-file-export")
         ]
         
         # Add User Management only for administrators
         if st.session_state.get('user_role') == 'Administrator':
-            pages.append(("User Management", "👥"))
+            pages.append(("User Management", "fi-tr-users"))
         
-        for page_name, icon in pages:
-            if st.button(f"{icon} {page_name}", key=f"nav_{page_name}", use_container_width=True):
-                st.session_state.current_page = page_name
-                st.rerun()
+        # Create navigation with columns for icon + button
+        for page_name, icon_class in pages:
+            col1, col2 = st.columns([0.12, 0.88])
+            
+            with col1:
+                # Display icon
+                st.markdown(f'<i class="fi {icon_class}" style="color: #e2e8f0; font-size: 1.2rem; line-height: 2.5;"></i>', unsafe_allow_html=True)
+            
+            with col2:
+                # Button without extra spacing
+                if st.button(page_name, key=f"nav_{page_name}", use_container_width=True):
+                    st.session_state.current_page = page_name
+                    st.rerun()
     
     # Main content area based on selected page
     if page == "Dashboard":

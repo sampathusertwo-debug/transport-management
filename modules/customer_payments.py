@@ -941,7 +941,7 @@ def manage_customers():
                         VALUES (%s, %s, %s, %s, %s, %s, %s)
                         RETURNING id, name, email, phone, address, gst_number, pan_number, payment_terms, created_date;
                         """
-                        result = execute_query(query, (new_customer_name, new_customer_email, new_customer_phone, 
+                        result = execute_query(query, (new_customer_name.title(), new_customer_email, new_customer_phone, 
                                                        new_customer_address, new_customer_gst, new_customer_pan,
                                                        new_customer_payment_terms), fetch=True)
                         

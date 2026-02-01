@@ -77,11 +77,11 @@ def create_customer_pricing_tables():
         for index_sql in indexes:
             execute_query(index_sql)
         
-        st.success("✅ Customer pricing tables created successfully!")
+        st.success("Customer pricing tables created successfully!")
         return True
     
     except Exception as e:
-        st.error(f"❌ Error creating customer pricing tables: {e}")
+        st.error(f"Error creating customer pricing tables: {e}")
         return False
 
 
@@ -98,7 +98,7 @@ def load_csv_pricing_data():
         default_file = os.path.join(data_folder, 'airport_to_import_and_export.csv')
         if os.path.exists(default_file):
             count = load_default_pricing_from_csv(default_file)
-            results.append(f"✅ Default pricing: {count} entries")
+            results.append(f"Default pricing: {count} entries")
         
         # Load customer-specific pricing files
         customer_files = {
@@ -111,13 +111,13 @@ def load_csv_pricing_data():
             file_path = os.path.join(data_folder, filename)
             if os.path.exists(file_path):
                 count = load_customer_pricing_from_csv(file_path, customer_name)
-                results.append(f"✅ {customer_name.title()}: {count} entries")
+                results.append(f"{customer_name.title()}: {count} entries")
         
         st.success("\n".join(results))
         return True
         
     except Exception as e:
-        st.error(f"❌ Error loading CSV pricing data: {e}")
+        st.error(f"Error loading CSV pricing data: {e}")
         return False
 
 
@@ -190,7 +190,7 @@ def load_default_pricing_from_csv(file_path):
         return added_count
         
     except Exception as e:
-        st.error(f"❌ Error loading default pricing: {e}")
+        st.error(f"Error loading default pricing: {e}")
         return 0
 
 
@@ -325,7 +325,7 @@ def load_customer_pricing_from_csv(file_path, customer_name):
         return added_count
         
     except Exception as e:
-        st.error(f"❌ Error loading pricing for {customer_name}: {e}")
+        st.error(f"Error loading pricing for {customer_name}: {e}")
         return 0
 
 

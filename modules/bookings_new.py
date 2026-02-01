@@ -137,7 +137,11 @@ def create_booking():
     with col1:
         customer = st.text_input("Customer*", placeholder="e.g., Fast Logistics", key="booking_customer")
         booking_date = st.date_input("Date*", value=datetime.datetime.now().date(), key="booking_date")
-        vehicle_type = st.selectbox("Vehicle Type*", ["7ft", "8ft", "12ft", "14ft", "17ft", "20ft", "24ft", "32ft"], key="booking_vehicle_type")
+        
+        # Load vehicle types from database
+        from database import get_vehicle_types
+        vehicle_type_options = get_vehicle_types()
+        vehicle_type = st.selectbox("Vehicle Type*", vehicle_type_options, key="booking_vehicle_type")
     
     with col2:
         route_from = st.text_input("Route From*", placeholder="e.g., Mepz", key="booking_route_from")
@@ -147,28 +151,34 @@ def create_booking():
     col1, col2 = st.columns(2)
     
     with col1:
-        vehicle_reg_no = st.text_input("Vehicle Reg No", placeholder="e.g., TN1XXXXXX", key="booking_reg_no")
+        vehicle_reg_no = st.text_input("Vehicle Registation Number*", placeholder="e.g., TN1XXXXXX", key="booking_reg_no")
         driver = st.text_input("Driver", placeholder="e.g., Nithish", key="booking_driver")
     
     with col2:
-        driver_phone = st.text_input("Driver Phone", placeholder="e.g., +91 7339X XXXXX", key="booking_driver_phone")
+        driver_phone = st.text_input("Driver Phone*", placeholder="e.g., +91 7339X XXXXX", key="booking_driver_phone")
         status = st.selectbox("Status", ["CREATED", "CONFIRMED", "DISPATCHED", "DELIVERED", "CANCELLED"], 
                              index=1, key="booking_status")  # Default to CONFIRMED
     
     # Submit button
     if st.button("💾 Create Booking", type="primary", use_container_width=True):
         # Validation
-        if not customer or not booking_date or not vehicle_type or not route_from or not route_to:
+        if not customer or not booking_date or not vehicle_type or not route_from or not route_to or not vehicle_reg_no or not driver_phone:
             st.error("❌ Please fill all required fields marked with *")
             return
         
+        # Validate driver phone
+        if not validate_mobile_number(driver_phone):
+            st.error("❌ Driver phone must be a valid 10-digit number (starting with 6-9)")
+            return
+        
         # Create booking data
+        from database import normalize_vehicle_type
         booking_data = {
             'id': str(uuid.uuid4()),
             'booking_number': booking_number,
-            'customer': customer,
+            'customer': customer.title(),
             'booking_date': booking_date,
-            'vehicle_type': vehicle_type,
+            'vehicle_type': normalize_vehicle_type(vehicle_type),
             'route_from': route_from,
             'route_to': route_to,
             'vehicle_reg_no': vehicle_reg_no,
@@ -354,14 +364,21 @@ def view_bookings():
                     
                     with edit_col1:
                         new_customer = st.text_input("Customer", value=booking.get('customer', ''), key=f"edit_customer_{booking_id}")
-                        new_vehicle_type = st.selectbox("Vehicle Type", ["7ft", "8ft", "12ft", "14ft", "17ft", "20ft", "24ft", "32ft"], 
-                                                      index=["7ft", "8ft", "12ft", "14ft", "17ft", "20ft", "24ft", "32ft"].index(booking.get('vehicle_type', '7ft')) if booking.get('vehicle_type') in ["7ft", "8ft", "12ft", "14ft", "17ft", "20ft", "24ft", "32ft"] else 0,
+                        
+                        # Load vehicle types from database
+                        from database import get_vehicle_types, get_vehicle_display_name
+                        vehicle_type_options = get_vehicle_types()
+                        current_vehicle_type_stored = booking.get('vehicle_type', '7ft')
+                        current_vehicle_type_display = get_vehicle_display_name(current_vehicle_type_stored)
+                        vehicle_type_index = vehicle_type_options.index(current_vehicle_type_display) if current_vehicle_type_display in vehicle_type_options else 0
+                        new_vehicle_type = st.selectbox("Vehicle Type", vehicle_type_options, 
+                                                      index=vehicle_type_index,
                                                       key=f"edit_vehicle_type_{booking_id}")
                         new_route_from = st.text_input("Route From", value=booking.get('route_from', ''), key=f"edit_route_from_{booking_id}")
                         new_route_to = st.text_input("Route To", value=booking.get('route_to', ''), key=f"edit_route_to_{booking_id}")
                     
                     with edit_col2:
-                        new_vehicle_reg = st.text_input("Vehicle Reg No", value=booking.get('vehicle_reg_no', ''), key=f"edit_vehicle_reg_{booking_id}")
+                        new_vehicle_reg = st.text_input("Vehicle Registation Number", value=booking.get('vehicle_reg_no', ''), key=f"edit_vehicle_reg_{booking_id}")
                         new_driver = st.text_input("Driver", value=booking.get('driver', ''), key=f"edit_driver_{booking_id}")
                         new_driver_phone = st.text_input("Driver Phone", value=booking.get('driver_phone', ''), key=f"edit_driver_phone_{booking_id}")
                         new_status = st.selectbox("Status", ["CREATED", "CONFIRMED", "DISPATCHED", "DELIVERED", "CANCELLED"], 
@@ -390,9 +407,10 @@ def view_bookings():
                             
                             # Update in database
                             from app import update_simplified_booking
+                            from database import normalize_vehicle_type
                             update_simplified_booking(booking_id, {
-                                'customer': new_customer,
-                                'vehicle_type': new_vehicle_type,
+                                'customer': new_customer.title(),
+                                'vehicle_type': normalize_vehicle_type(new_vehicle_type),
                                 'route_from': new_route_from,
                                 'route_to': new_route_to,
                                 'vehicle_reg_no': new_vehicle_reg,

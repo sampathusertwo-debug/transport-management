@@ -1,4 +1,4 @@
-import streamlit as st
+﻿import streamlit as st
 import pandas as pd
 import datetime
 import uuid
@@ -15,7 +15,7 @@ from .customer_pricing import get_pricing_for_customer, search_customer_by_name
 
 def show_quotation_success_page(title, message, created_item_id=None, created_item_number=None, module_name="quotations"):
     """Show success page with navigation options for quotations"""
-    st.markdown(f"### ✅ {title}")
+    st.markdown(f"### {title}")
     st.success(message)
     
     if created_item_number:
@@ -31,7 +31,7 @@ def show_quotation_success_page(title, message, created_item_id=None, created_it
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        if st.button("➕ Create Another Quotation", type="primary", width="stretch"):
+        if st.button("Create Another Quotation", type="primary", width="stretch"):
             # Clear any success flags and return to create mode
             if 'show_quotation_success_page' in st.session_state:
                 del st.session_state['show_quotation_success_page']
@@ -55,7 +55,7 @@ def show_quotation_success_page(title, message, created_item_id=None, created_it
             st.rerun()
     
     with col3:
-        if st.button("🏠 Go to Dashboard", width="stretch"):
+        if st.button("Go to Dashboard", width="stretch"):
             # Clear success state and go to dashboard
             if 'show_quotation_success_page' in st.session_state:
                 del st.session_state['show_quotation_success_page']
@@ -194,7 +194,7 @@ def show():
         )
         return
     
-    st.header("📋 Quotations Management")
+    st.header("Quotations Management")
     
     # Handle tab switching from success page
     active_tab_index = 1 if st.session_state.get('active_quotation_tab') == "view" else 0
@@ -220,8 +220,11 @@ def create_quotation():
     
     st.info(f"**Quotation Number:** {quotation_number}")
     
-    # Simple quotation form matching booking structure
-    st.markdown("**📋 QUOTATION DETAILS**")
+    # Date field at the top
+    quotation_date = st.date_input("Date*", value=datetime.datetime.now().date(), key="quotation_date")
+    
+    # QUOTATION DETAILS section
+    st.markdown("**QUOTATION DETAILS**")
     col1, col2 = st.columns(2)
     
     with col1:
@@ -229,91 +232,43 @@ def create_quotation():
         from database import load_data_when_needed
         load_data_when_needed('customers')
         
+        # Get customer list
         if hasattr(st.session_state, 'customers') and st.session_state.customers:
-            customer_options = [c['name'] for c in st.session_state.customers]
-            customer = searchable_selectbox("Customer*", customer_options, key="quotation_customer", help_text="Select existing customer or add new one in Customers tab")
+            customer_options = ["➕ Add New Customer"] + [c['name'] for c in st.session_state.customers]
         else:
-            st.warning("⚠️ No customers found. Please add customers first in the Customers tab.")
-            customer = st.text_input("Customer* (Manual Entry)", placeholder="e.g., Fast Logistics", key="quotation_customer_manual")
+            customer_options = ["➕ Add New Customer"]
         
-        quotation_date = st.date_input("Date*", value=datetime.datetime.now().date(), key="quotation_date")
-        vehicle_type = st.selectbox("Vehicle Type*", ["7ft", "8ft", "12ft", "14ft", "17ft", "20ft", "24ft", "32ft"], key="quotation_vehicle_type")
+        # Use selectbox with all customers (has built-in search)
+        customer_selection = st.selectbox(
+            "Customer*",
+            customer_options,
+            key="quotation_customer",
+            help="Select existing customer or choose 'Add New Customer' to create one"
+        )
+        
+        # If user selects "Add New Customer", show text input
+        if customer_selection == "➕ Add New Customer":
+            customer = st.text_input(
+                "Enter New Customer Name",
+                key="quotation_new_customer_name",
+                placeholder="e.g., ABC Logistics"
+            )
+            if customer:
+                st.info(f"New customer '{customer}' will be added when you create the quotation.")
+        else:
+            customer = customer_selection
+        
+        # Load vehicle types from database
+        from database import get_vehicle_types
+        vehicle_type_options = get_vehicle_types()
+        vehicle_type = st.selectbox("Vehicle Type*", vehicle_type_options, key="quotation_vehicle_type")
     
     with col2:
         pickup_location = st.text_input("Pick up*", placeholder="e.g., Mepz", key="quotation_pickup")
         destination = st.text_input("Destination*", placeholder="e.g., Airport", key="quotation_destination")
     
-    # Pricing lookup section
-    st.markdown("**💰 PRICING**")
-    col_price1, col_price2 = st.columns([3, 1])
-    
-    with col_price1:
-        # Initialize pricing in session state
-        if 'quotation_suggested_rate' not in st.session_state:
-            st.session_state.quotation_suggested_rate = None
-        
-        # Display pricing if available
-        if st.session_state.quotation_suggested_rate:
-            pricing_info = st.session_state.quotation_suggested_rate
-            st.info(f"💰 **Suggested Rate: ₹ {pricing_info['rate']:,.2f}**\n\n"
-                   f"📍 Route: {pricing_info.get('origin', pickup_location)} → {pricing_info.get('destination', destination)}\n\n"
-                   f"🚛 Vehicle: {pricing_info.get('vehicle_type', vehicle_type)}\n\n"
-                   f"📊 Source: {pricing_info.get('source', 'Unknown')}")
-            if pricing_info.get('halting_charge') and pricing_info.get('halting_charge') > 0:
-                st.caption(f"⏱️ Halting Charge: ₹ {pricing_info['halting_charge']:,.2f}")
-            if pricing_info.get('unloading_free_time'):
-                st.caption(f"📦 {pricing_info['unloading_free_time']}")
-    
-    with col_price2:
-        if st.button("🔍 Find Price", key="quotation_find_price", help="Search for pricing based on customer, route, and vehicle"):
-            if customer and pickup_location and destination and vehicle_type:
-                # Search for customer
-                customers = search_customer_by_name(customer)
-                customer_id = customers[0]['id'] if customers else None
-                
-                # Get pricing
-                pricing = get_pricing_for_customer(
-                    customer_id,
-                    customer,
-                    pickup_location,
-                    destination,
-                    vehicle_type
-                )
-                
-                if pricing:
-                    st.session_state.quotation_suggested_rate = pricing
-                    st.rerun()
-                else:
-                    st.warning("⚠️ No pricing found for this combination")
-                    st.session_state.quotation_suggested_rate = None
-            else:
-                st.error("❌ Please fill customer, pickup, destination, and vehicle type first")
-    
-    # Price input field
-    price_col1, price_col2, price_col3 = st.columns([2, 1, 1])
-    
-    with price_col1:
-        price = st.number_input(
-            "Price* (₹)",
-            min_value=0.0,
-            step=100.0,
-            value=float(st.session_state.quotation_suggested_rate['rate']) if st.session_state.quotation_suggested_rate else 0.0,
-            key="quotation_price",
-            help="Enter the quotation price"
-        )
-    
-    with price_col2:
-        if st.session_state.quotation_suggested_rate:
-            st.caption(f"📊 Suggested: ₹{st.session_state.quotation_suggested_rate['rate']:,.0f}")
-    
-    with price_col3:
-        if price > 0 and st.session_state.quotation_suggested_rate:
-            diff = price - st.session_state.quotation_suggested_rate['rate']
-            diff_pct = (diff / st.session_state.quotation_suggested_rate['rate']) * 100 if st.session_state.quotation_suggested_rate['rate'] > 0 else 0
-            color = "🟢" if diff == 0 else ("🔴" if diff < 0 else "🟡")
-            st.caption(f"{color} {diff:+.0f} ({diff_pct:+.0f}%)")
-    
-    st.markdown("**🚛 VEHICLE & DRIVER DETAILS**")
+    # VEHICLE & DRIVER DETAILS section
+    st.markdown("**VEHICLE & DRIVER DETAILS**")
     col1, col2 = st.columns(2)
     
     # Load vehicle and driver data
@@ -324,34 +279,83 @@ def create_quotation():
     with col1:
         # Vehicle selection
         if hasattr(st.session_state, 'vehicles') and st.session_state.vehicles:
-            vehicle_options = ["None"] + [v['registration_number'] for v in st.session_state.vehicles if v.get('status') == 'Active']
-            selected_vehicle = searchable_selectbox("Vehicle Reg No", vehicle_options, key="quotation_vehicle")
-            vehicle_reg_no = selected_vehicle if selected_vehicle != "None" else ""
+            vehicle_options = ["➕ Add New Vehicle/Vendor"] + [v['registration_number'] for v in st.session_state.vehicles if v.get('status') == 'Active']
+            selected_vehicle = st.selectbox("Vehicle Registation Number*", vehicle_options, key="quotation_vehicle", help="Select existing vehicle or choose 'Add New Vehicle/Vendor' to create one")
             
-            # Get driver info for selected vehicle
-            selected_vehicle_data = next((v for v in st.session_state.vehicles if v['registration_number'] == selected_vehicle), None) if selected_vehicle != "None" else None
-            linked_driver_name = selected_vehicle_data.get('linked_driver') if selected_vehicle_data else ""
+            if selected_vehicle == "➕ Add New Vehicle/Vendor":
+                vehicle_reg_no = st.text_input("Enter Vehicle Registration Number", key="quotation_new_vehicle_reg", placeholder="e.g., TN01AB1234")
+                if vehicle_reg_no:
+                    # Load vendors
+                    load_data_when_needed('vendors')
+                    if hasattr(st.session_state, 'vendors') and st.session_state.vendors:
+                        vendor_options = ["None", "➕ Add New Vendor"] + [v['name'] for v in st.session_state.vendors]
+                    else:
+                        vendor_options = ["None", "➕ Add New Vendor"]
+                    
+                    selected_vendor = st.selectbox("Select Vendor (Optional)", vendor_options, key="quotation_new_vehicle_vendor", help="Link this vehicle to a vendor")
+                    
+                    if selected_vendor == "➕ Add New Vendor":
+                        vendor_name = st.text_input("Enter Vendor Name", key="quotation_new_vendor_name", placeholder="e.g., ABC Transport Services")
+                        if vendor_name:
+                            st.info(f"New vendor '{vendor_name}' will be added when you create the quotation.")
+                    
+                    st.info(f"New vehicle '{vehicle_reg_no}' will be added when you create the quotation.")
+                linked_driver_name = ""
+            else:
+                vehicle_reg_no = selected_vehicle
+                # Get driver info for selected vehicle
+                selected_vehicle_data = next((v for v in st.session_state.vehicles if v['registration_number'] == selected_vehicle), None)
+                linked_driver_name = selected_vehicle_data.get('linked_driver') if selected_vehicle_data else ""
         else:
-            st.warning("No vehicles found. Please add vehicles in Vehicle Master.")
-            vehicle_reg_no = st.text_input("Vehicle Reg No", placeholder="e.g., TN1XXXXXX", key="quotation_reg_no_manual")
+            vehicle_options = ["➕ Add New Vehicle/Vendor"]
+            selected_vehicle = st.selectbox("Vehicle Registation Number*", vehicle_options, key="quotation_vehicle", help="Select existing vehicle or choose 'Add New Vehicle/Vendor' to create one")
+            
+            vehicle_reg_no = st.text_input("Enter Vehicle Registration Number", key="quotation_new_vehicle_reg", placeholder="e.g., TN01AB1234")
+            if vehicle_reg_no:
+                # Load vendors
+                load_data_when_needed('vendors')
+                if hasattr(st.session_state, 'vendors') and st.session_state.vendors:
+                    vendor_options = ["None", "➕ Add New Vendor"] + [v['name'] for v in st.session_state.vendors]
+                else:
+                    vendor_options = ["None", "➕ Add New Vendor"]
+                
+                selected_vendor = st.selectbox("Select Vendor (Optional)", vendor_options, key="quotation_new_vehicle_vendor", help="Link this vehicle to a vendor")
+                
+                if selected_vendor == "➕ Add New Vendor":
+                    vendor_name = st.text_input("Enter Vendor Name", key="quotation_new_vendor_name", placeholder="e.g., ABC Transport Services")
+                    if vendor_name:
+                        st.info(f"New vendor '{vendor_name}' will be added when you create the quotation.")
+                
+                st.info(f"New vehicle '{vehicle_reg_no}' will be added when you create the quotation.")
             linked_driver_name = ""
         
         # Driver selection
         if hasattr(st.session_state, 'drivers') and st.session_state.drivers:
-            driver_options = ["None"] + [d['name'] for d in st.session_state.drivers if d.get('status') in ['Available', 'On Trip']]
+            driver_options = ["➕ Add New Driver"] + [d['name'] for d in st.session_state.drivers if d.get('status') in ['Available', 'On Trip']]
             # Pre-select linked driver if vehicle has one
             default_driver_index = 0
             if linked_driver_name and linked_driver_name in driver_options:
                 default_driver_index = driver_options.index(linked_driver_name)
             
-            selected_driver = searchable_selectbox("Driver", driver_options, default_index=default_driver_index, key="quotation_driver_select")
-            driver = selected_driver if selected_driver != "None" else ""
+            selected_driver = st.selectbox("Driver*", driver_options, index=default_driver_index, key="quotation_driver_select", help="Select existing driver or choose 'Add New Driver' to create one")
             
-            # Get driver phone for selected driver
-            selected_driver_data = next((d for d in st.session_state.drivers if d['name'] == selected_driver), None) if selected_driver != "None" else None
-            driver_phone_from_master = selected_driver_data.get('phone', '') if selected_driver_data else ''
+            if selected_driver == "➕ Add New Driver":
+                driver = st.text_input("Enter New Driver Name", key="quotation_new_driver_name", placeholder="e.g., Ravi Kumar")
+                if driver:
+                    st.info(f"New driver '{driver}' will be added when you create the quotation.")
+                driver_phone_from_master = ""
+            else:
+                driver = selected_driver
+                # Get driver phone for selected driver
+                selected_driver_data = next((d for d in st.session_state.drivers if d['name'] == selected_driver), None)
+                driver_phone_from_master = selected_driver_data.get('phone', '') if selected_driver_data else ''
         else:
-            driver = st.text_input("Driver", placeholder="e.g., Nithish", key="quotation_driver_manual")
+            driver_options = ["➕ Add New Driver"]
+            selected_driver = st.selectbox("Driver*", driver_options, key="quotation_driver_select", help="Select existing driver or choose 'Add New Driver' to create one")
+            
+            driver = st.text_input("Enter New Driver Name", key="quotation_new_driver_name", placeholder="e.g., Ravi Kumar")
+            if driver:
+                st.info(f"New driver '{driver}' will be added when you create the quotation.")
             driver_phone_from_master = ""
     
     with col2:
@@ -368,37 +372,209 @@ def create_quotation():
                     st.session_state['quotation_driver_phone'] = new_phone
                     st.session_state[f'last_quotation_driver'] = current_driver
         
-        driver_phone = st.text_input("Driver Phone", placeholder="e.g., 7339X XXXXX", key="quotation_driver_phone")
-        status = st.selectbox("Status", ["CREATED", "APPROVED", "REJECTED", "CONVERTED"], 
-                             index=0, key="quotation_status")  # Default to CREATED
+        driver_phone = st.text_input("Driver Phone*", placeholder="e.g., 7339X XXXXX", key="quotation_driver_phone")
+    
+    # PRICING section
+    st.markdown("***PRICING**")
+    
+    # Pricing lookup
+    col_price1, col_price2 = st.columns([4, 1])
+    
+    with col_price1:
+        # Initialize pricing in session state
+        if 'quotation_suggested_rate' not in st.session_state:
+            st.session_state.quotation_suggested_rate = None
+        
+        # Display pricing if available
+        if st.session_state.quotation_suggested_rate:
+            pricing_info = st.session_state.quotation_suggested_rate
+            
+            # Build info message
+            info_msg = f"**Suggested Rate: ₹ {pricing_info['rate']:,.2f}**\n\n"
+            info_msg += f"**Route:** {pricing_info.get('origin', pickup_location)} → {pricing_info.get('destination', destination)}\n\n"
+            info_msg += f"**Vehicle:** {pricing_info.get('vehicle_type', vehicle_type)}"
+            
+            if pricing_info.get('halting_charge') and pricing_info.get('halting_charge') > 0:
+                info_msg += f"\n\nHalting Charge: ₹ {pricing_info['halting_charge']:,.2f}/hr"
+            if pricing_info.get('unloading_free_time'):
+                info_msg += f"\n\nFree Time: {pricing_info['unloading_free_time']} mins"
+            
+            st.info(info_msg)
+        else:
+            st.info("Click 'Find Price' to get suggested pricing for this quotation")
+    
+    with col_price2:
+        st.markdown("<br>", unsafe_allow_html=True)  # Add spacing
+        if st.button("Find Price", key="quotation_find_price", use_container_width=True, type="primary"):
+            if customer and pickup_location and destination and vehicle_type:
+                # Search for customer
+                customers = search_customer_by_name(customer)
+                customer_id = customers[0]['id'] if customers else None
+                
+                # Get pricing (need to normalize vehicle type for lookup)
+                from database import normalize_vehicle_type
+                normalized_vehicle = normalize_vehicle_type(vehicle_type)
+                
+                pricing = get_pricing_for_customer(
+                    customer_id,
+                    customer,
+                    pickup_location,
+                    destination,
+                    normalized_vehicle
+                )
+                
+                if pricing:
+                    st.session_state.quotation_suggested_rate = pricing
+                    st.rerun()
+                else:
+                    st.warning("No pricing found for this combination")
+                    st.session_state.quotation_suggested_rate = None
+            else:
+                st.error("Please fill customer, pickup, destination, and vehicle type first")
+    
+    # Price input field
+    price_col1, price_col2, price_col3 = st.columns([2, 1, 1])
+    
+    with price_col1:
+        price = st.number_input(
+            "Price (₹)",
+            min_value=0.0,
+            step=100.0,
+            value=float(st.session_state.quotation_suggested_rate['rate']) if st.session_state.quotation_suggested_rate else 0.0,
+            key="quotation_price",
+            help="Enter the quotation price"
+        )
+    
+    with price_col2:
+        if st.session_state.quotation_suggested_rate:
+            st.caption(f"Suggested: ₹{st.session_state.quotation_suggested_rate['rate']:,.0f}")
+    
+    with price_col3:
+        if price > 0 and st.session_state.quotation_suggested_rate:
+            diff = price - st.session_state.quotation_suggested_rate['rate']
+            diff_pct = (diff / st.session_state.quotation_suggested_rate['rate']) * 100 if st.session_state.quotation_suggested_rate['rate'] > 0 else 0
+            color = "🟢" if diff == 0 else ("🔴" if diff < 0 else "🟡")
+            st.caption(f"{color} {diff:+.0f} ({diff_pct:+.0f}%)")
     
     # Submit button
-    if st.button("💾 Create Quotation", type="primary", width="stretch"):
+    if st.button("Create Quotation", type="primary", use_container_width=True):
         # Validation
-        if not customer or not quotation_date or not vehicle_type or not pickup_location or not destination:
-            st.error("❌ Please fill all required fields marked with *")
+        if not customer or not quotation_date or not vehicle_type or not pickup_location or not destination or not vehicle_reg_no or not driver_phone:
+            st.error("Please fill all required fields marked with *")
             return
         
-        # Validate driver phone if provided
-        if driver_phone and not validate_mobile_number(driver_phone):
-            st.error("❌ Driver phone must be a valid 10-digit number (starting with 6-9)")
+        # Validate driver phone
+        if not validate_mobile_number(driver_phone):
+            st.error("Driver phone must be a valid 10-digit number (starting with 6-9)")
             return
+        
+        # Check if customer exists, if not create it
+        customer_id = None
+        if hasattr(st.session_state, 'customers') and st.session_state.customers:
+            existing_customer = next((c for c in st.session_state.customers if c['name'].lower() == customer.lower()), None)
+            if existing_customer:
+                customer_id = existing_customer['id']
+            else:
+                # Create new customer
+                from database import add_to_database
+                new_customer_data = {
+                    'id': str(uuid.uuid4()),
+                    'name': customer.title(),
+                    'created_date': datetime.datetime.now()
+                }
+                customer_id = add_to_database('customers', new_customer_data)
+                if customer_id:
+                    st.success(f"New customer '{customer}' added successfully!")
+                    # Refresh customer list
+                    from database import refresh_data
+                    refresh_data('customers')
+                    load_data_when_needed('customers')
+        
+        # Check if driver exists, if not create it
+        if driver and hasattr(st.session_state, 'drivers'):
+            existing_driver = next((d for d in st.session_state.drivers if d['name'].lower() == driver.lower()), None)
+            if not existing_driver:
+                # Create new driver
+                from database import add_to_database
+                new_driver_data = {
+                    'id': str(uuid.uuid4()),
+                    'name': driver.title(),
+                    'phone': driver_phone,
+                    'status': 'Available',
+                    'created_date': datetime.datetime.now()
+                }
+                driver_id = add_to_database('drivers', new_driver_data)
+                if driver_id:
+                    st.success(f"New driver '{driver}' added successfully!")
+                    # Refresh driver list
+                    from database import refresh_data
+                    refresh_data('drivers')
+                    load_data_when_needed('drivers')
+        
+        # Check if vehicle exists, if not create it
+        if vehicle_reg_no and hasattr(st.session_state, 'vehicles'):
+            existing_vehicle = next((v for v in st.session_state.vehicles if v['registration_number'].lower() == vehicle_reg_no.lower()), None)
+            if not existing_vehicle:
+                # Check if vendor needs to be created
+                vendor_id = None
+                if st.session_state.get('quotation_new_vehicle_vendor') == "➕ Add New Vendor":
+                    vendor_name = st.session_state.get('quotation_new_vendor_name', '')
+                    if vendor_name:
+                        # Create new vendor
+                        from database import add_to_database
+                        new_vendor_data = {
+                            'id': str(uuid.uuid4()),
+                            'name': vendor_name.title(),
+                            'vendor_type': 'Vehicle Vendor',
+                            'created_date': datetime.datetime.now()
+                        }
+                        vendor_id = add_to_database('vendors', new_vendor_data)
+                        if vendor_id:
+                            st.success(f"New vendor '{vendor_name}' added successfully!")
+                            # Refresh vendor list
+                            from database import refresh_data
+                            refresh_data('vendors')
+                            load_data_when_needed('vendors')
+                elif st.session_state.get('quotation_new_vehicle_vendor') and st.session_state.get('quotation_new_vehicle_vendor') not in ["None", "➕ Add New Vendor"]:
+                    # Use existing vendor
+                    vendor_name = st.session_state.get('quotation_new_vehicle_vendor')
+                    existing_vendor = next((v for v in st.session_state.vendors if v['name'] == vendor_name), None)
+                    if existing_vendor:
+                        vendor_id = existing_vendor['id']
+                
+                # Create new vehicle
+                from database import add_to_database
+                new_vehicle_data = {
+                    'id': str(uuid.uuid4()),
+                    'registration_number': vehicle_reg_no.upper(),
+                    'vehicle_type': vehicle_type,
+                    'status': 'Active',
+                    'created_date': datetime.datetime.now()
+                }
+                vehicle_id = add_to_database('vehicles', new_vehicle_data)
+                if vehicle_id:
+                    st.success(f"New vehicle '{vehicle_reg_no}' added successfully!")
+                    # Refresh vehicle list
+                    from database import refresh_data
+                    refresh_data('vehicles')
+                    load_data_when_needed('vehicles')
         
         # Create quotation data
+        from database import normalize_vehicle_type
         quotation_data = {
             'id': str(uuid.uuid4()),
             'quotation_number': quotation_number,
-            'customer': customer,
+            'customer': customer.title(),
             'quotation_date': quotation_date,
-            'vehicle_type': vehicle_type,
-            'route_from': pickup_location,
-            'route_to': destination,
-            'base_price': price,
-            'total_amount': price,
+            'vehicle_type': normalize_vehicle_type(vehicle_type),
+            'route_from': pickup_location.upper(),
+            'route_to': destination.upper(),
+            'base_price': price if price > 0 else None,
+            'total_amount': price if price > 0 else None,
             'vehicle_reg_no': vehicle_reg_no,
             'driver': driver,
             'driver_phone': driver_phone,
-            'status': status,
+            'status': 'CREATED',
             'created_date': datetime.datetime.now(),
             'last_modified': datetime.datetime.now()
         }
@@ -445,9 +621,9 @@ def create_quotation():
                 }
                 st.rerun()
             else:
-                st.error("❌ Failed to save quotation. Please try again.")
+                st.error("Failed to save quotation. Please try again.")
         except Exception as e:
-            st.error(f"❌ Error creating quotation: {str(e)}")
+            st.error(f"Error creating quotation: {str(e)}")
 
 
 def view_quotations():
@@ -552,7 +728,7 @@ def view_quotations():
                         st.session_state[f"show_copy_{quotation.get('id')}"] = False
                         st.rerun()
                 else:
-                    if st.button("📋 Copy", key=f"copy_btn_{quotation.get('id')}", help="Click to copy text"):
+                    if st.button("Copy", key=f"copy_btn_{quotation.get('id')}", help="Click to copy text"):
                         st.session_state[f"show_copy_{quotation.get('id')}"] = True
                         st.rerun()
             with col_copy2:
@@ -561,7 +737,7 @@ def view_quotations():
             if st.session_state.get(f"show_copy_{quotation.get('id')}", False):
                 with copy_placeholder.container():
                     st.code(quotation_text, language="text")
-                    st.success("✅ Select and copy the text above!")
+                    st.success("Select and copy the text above!")
                         
             # Action buttons - adjust based on quotation status
             st.markdown("---")
@@ -569,13 +745,13 @@ def view_quotations():
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
-                    if st.button(f"✏️ Edit", key=f"edit_{quotation['id']}"):
+                    if st.button(f"Edit", key=f"edit_{quotation['id']}"):
                         st.session_state.editing_quotation_id = quotation['id']
                         st.session_state.editing_quotation_mode = True
                         st.rerun()
                 
                 with col2:
-                    if quotation.get('status') == 'CREATED' and st.button(f"✅ Approve", key=f"approve_{quotation['id']}"):
+                    if quotation.get('status') == 'CREATED' and st.button(f"Approve", key=f"approve_{quotation['id']}"):
                         if update_quotation_status(quotation['id'], 'APPROVED'):
                             st.success("Quotation approved successfully!")
                             st.rerun()
@@ -583,7 +759,7 @@ def view_quotations():
                             st.error("Failed to approve quotation. Please try again.")
                 
                 with col3:
-                    if quotation.get('status') == 'CREATED' and st.button(f"❌ Reject", key=f"reject_{quotation['id']}"):
+                    if quotation.get('status') == 'CREATED' and st.button(f"Reject", key=f"reject_{quotation['id']}"):
                         if update_quotation_status(quotation['id'], 'REJECTED'):
                             st.warning("Quotation rejected.")
                             st.rerun()
@@ -594,20 +770,20 @@ def view_quotations():
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
-                    if st.button(f"📦 Create Booking", key=f"booking_{quotation['id']}"):
+                    if st.button(f"Create Booking", key=f"booking_{quotation['id']}"):
                         st.session_state.selected_quotation_id = quotation['id']
                         st.session_state.current_page = "Bookings"
                         st.rerun()
                 
                 with col2:
-                    if st.button(f"✏️ Revise", key=f"revise_{quotation['id']}", help="Create a revised version of this quotation"):
+                    if st.button(f"Revise", key=f"revise_{quotation['id']}", help="Create a revised version of this quotation"):
                         st.session_state.editing_quotation_id = quotation['id']
                         st.session_state.editing_quotation_mode = True
                         st.session_state.revise_mode = True
                         st.rerun()
                 
                 with col3:
-                    if st.button(f"📋 Convert to Booking", key=f"convert_{quotation['id']}"):
+                    if st.button(f"Convert to Booking", key=f"convert_{quotation['id']}"):
                         if update_quotation_status(quotation['id'], 'CONVERTED'):
                             st.success("Quotation converted!")
                             st.rerun()
@@ -647,7 +823,7 @@ def edit_quotation():
     st.subheader(f"Edit Quotation - {quotation['quotation_number']}")
     
     # Simple quotation edit form
-    st.markdown("**📋 QUOTATION DETAILS**")
+    st.markdown("**QUOTATION DETAILS**")
     col1, col2 = st.columns(2)
     
     with col1:
@@ -663,10 +839,16 @@ def edit_quotation():
             customer = st.text_input("Customer*", value=quotation.get('customer', ''), key="edit_quotation_customer")
         
         pickup_location = st.text_input("Pickup Location*", value=quotation.get('route_from', ''), key="edit_quotation_pickup")
-        vehicle_type_options = ["7ft", "8ft", "12ft", "14ft", "17ft", "20ft", "24ft", "32ft"]
+        
+        # Load vehicle types from database
+        from database import get_vehicle_types, get_vehicle_display_name
+        vehicle_type_options = get_vehicle_types()
+        current_vehicle_type_stored = quotation.get('vehicle_type', '7ft')
+        current_vehicle_type_display = get_vehicle_display_name(current_vehicle_type_stored)
+        vehicle_type_index = vehicle_type_options.index(current_vehicle_type_display) if current_vehicle_type_display in vehicle_type_options else 0
         vehicle_type = st.selectbox("Vehicle Type*", 
                                    vehicle_type_options,
-                                   index=vehicle_type_options.index(quotation.get('vehicle_type', '7ft')) if quotation.get('vehicle_type') in vehicle_type_options else 0,
+                                   index=vehicle_type_index,
                                    key="edit_quotation_vehicle")
     
     with col2:
@@ -697,18 +879,19 @@ def edit_quotation():
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        if st.button("💾 Save Changes", type="primary"):
+        if st.button("Save Changes", type="primary"):
             # Validation
             if not all([customer, pickup_location, destination, vehicle_type, driver, driver_phone]):
-                st.error("❌ Please fill all required fields marked with *")
+                st.error("Please fill all required fields marked with *")
                 return
             
             # Prepare update data
+            from database import normalize_vehicle_type
             updated_quotation = {
                 'customer': customer,
                 'route_from': pickup_location,
                 'route_to': destination,
-                'vehicle_type': vehicle_type,
+                'vehicle_type': normalize_vehicle_type(vehicle_type),
                 'driver': driver,
                 'driver_phone': driver_phone,
                 'vehicle_reg_no': vehicle_reg_no,
@@ -719,7 +902,7 @@ def edit_quotation():
             from app import update_simplified_quotation
             try:
                 if update_simplified_quotation(quotation_id, updated_quotation):
-                    st.success("✅ Quotation updated successfully!")
+                    st.success("Quotation updated successfully!")
                     
                     # Add note for quotation update
                     from .notes import add_status_note
@@ -744,12 +927,12 @@ def edit_quotation():
                         del st.session_state['editing_quotation_mode']
                     st.rerun()
                 else:
-                    st.error("❌ Failed to update quotation. Please try again.")
+                    st.error("Failed to update quotation. Please try again.")
             except Exception as e:
-                st.error(f"❌ Error updating quotation: {str(e)}")
+                st.error(f"Error updating quotation: {str(e)}")
     
     with col2:
-        if st.button("❌ Cancel", key="edit_cancel"):
+        if st.button("Cancel", key="edit_cancel"):
             # Add note for edit cancellation
             from .notes import add_status_note
             add_status_note(
@@ -766,7 +949,7 @@ def edit_quotation():
             st.rerun()
     
     with col3:
-        if st.button("🗑️ Delete", key="edit_delete"):
+        if st.button("Delete", key="edit_delete"):
             # Delete quotation
             from database import execute_query
             try:
@@ -809,7 +992,7 @@ def manage_customers():
         if len(same_name_customers) > 1:
             customer_display = customer['name'] + phone_suffix
         
-        with st.expander(f"👤 {customer_display} - ID: {customer['id'][:8]}..."):
+        with st.expander(f"{customer_display} - ID: {customer['id'][:8]}..."):
             col1, col2, col3 = st.columns(3)
             
             with col1:
@@ -828,7 +1011,7 @@ def manage_customers():
                 edit_col, remove_col = st.columns(2)
                 
                 with edit_col:
-                    if st.button(f"✏️ Edit", key=f"quot_edit_customer_{customer['id']}"):
+                    if st.button(f"Edit", key=f"quot_edit_customer_{customer['id']}"):
                         st.session_state[f"quot_editing_customer_{customer['id']}"] = True
                         st.rerun()
                 
@@ -837,17 +1020,17 @@ def manage_customers():
                     can_del, blocking_records = can_delete_customer(customer)
                     
                     if can_del:
-                        if st.button(f"🗑️ Remove", key=f"quot_remove_customer_{customer['id']}", type="secondary"):
+                        if st.button(f"Remove", key=f"quot_remove_customer_{customer['id']}", type="secondary"):
                             st.session_state[f"quot_removing_{customer['id']}"] = True
                             st.rerun()
                     else:
-                        st.button(f"🚫 Remove", key=f"quot_remove_customer_{customer['id']}", 
+                        st.button(f"Remove", key=f"quot_remove_customer_{customer['id']}", 
                                  disabled=True, 
                                  help=f"Cannot delete - has {', '.join(blocking_records)}")
                 
                 # Remove confirmation
                 if st.session_state.get(f"quot_removing_{customer['id']}", False):
-                    st.warning(f"⚠️ Confirm removal of customer: **{customer['name']}**")
+                    st.warning(f"Confirm removal of customer: **{customer['name']}**")
                     confirm_col, cancel_col = st.columns(2)
                     
                     with confirm_col:
@@ -890,7 +1073,7 @@ def manage_customers():
                 save_col, cancel_col = st.columns(2)
                 
                 with save_col:
-                    if st.button(f"💾 Save Changes", key=f"quot_save_customer_{customer['id']}", type="primary"):
+                    if st.button(f"Save Changes", key=f"quot_save_customer_{customer['id']}", type="primary"):
                         # Update customer data
                         customer['name'] = new_name
                         customer['phone'] = new_phone
@@ -931,13 +1114,13 @@ def manage_customers():
                         st.rerun()
                 
                 with cancel_col:
-                    if st.button(f"❌ Cancel", key=f"quot_cancel_customer_{customer['id']}"):
+                    if st.button(f"Cancel", key=f"quot_cancel_customer_{customer['id']}"):
                         del st.session_state[f"quot_editing_customer_{customer['id']}"]
                         st.rerun()
     
     # Export customers
     st.markdown("---")
-    if st.button("📊 Export Customers to CSV", key="quot_export_customers"):
+    if st.button("Export Customers to CSV", key="quot_export_customers"):
         customers_data = []
         for customer in st.session_state.customers:
             customers_data.append({

@@ -7,11 +7,12 @@ from .utils import searchable_selectbox, static_selectbox
 
 def show():
     """Display the vehicle master module"""
-    st.header("🚛 Vehicle Master")
+    st.header("Vehicle Master")
     
     # Main tabs
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "Vehicle & Driver Management", 
+        "Vehicle Types",
         "Fuel Logs", 
         "Odometer Logs", 
         "Vehicle Reports",
@@ -22,15 +23,18 @@ def show():
         vehicle_driver_management()
     
     with tab2:
-        fuel_logs()
+        vehicle_type_management()
     
     with tab3:
-        odometer_logs()
+        fuel_logs()
     
     with tab4:
-        vehicle_reports()
+        odometer_logs()
     
     with tab5:
+        vehicle_reports()
+    
+    with tab6:
         st.info("Maintenance tracking feature coming soon!")
 
 def vehicle_driver_management():
@@ -52,7 +56,7 @@ def vehicle_driver_management():
         # Display existing vehicles
         if st.session_state.vehicles:
             for vehicle in st.session_state.vehicles:
-                with st.expander(f"🚛 {vehicle['registration_number']} - {vehicle['vehicle_type']}"):
+                with st.expander(f"{vehicle['registration_number']} - {vehicle['vehicle_type']}"):
                     st.write(f"**Registration:** {vehicle['registration_number']}")
                     st.write(f"**Type:** {vehicle['vehicle_type']}")
                     st.write(f"**Length:** {vehicle.get('vehicle_length', 'N/A')}")
@@ -87,7 +91,7 @@ def vehicle_driver_management():
         # Display existing drivers
         if st.session_state.drivers:
             for driver in st.session_state.drivers:
-                with st.expander(f"👤 {driver['name']} - {driver.get('license_number', 'N/A')}"):
+                with st.expander(f"{driver['name']} - {driver.get('license_number', 'N/A')}"):
                     st.write(f"**Name:** {driver['name']}")
                     st.write(f"**License Number:** {driver.get('license_number', 'N/A')}")
                     st.write(f"**Phone:** {driver.get('phone', 'N/A')}")
@@ -212,6 +216,251 @@ def add_driver_form():
             st.rerun()
         else:
             st.error("Failed to save driver. Please try again.")
+
+def vehicle_type_management():
+    """Manage vehicle types"""
+    st.subheader("Vehicle Type Management")
+    
+    # Add new vehicle type
+    with st.expander("Add New Vehicle Type", expanded=False):
+        add_vehicle_type_form()
+    
+    st.markdown("---")
+    
+    # Display existing vehicle types
+    from database import execute_query
+    
+    query = """
+        SELECT id, type_name, display_name, capacity_description, sort_order, is_active
+        FROM vehicle_types
+        ORDER BY sort_order
+    """
+    vehicle_types = execute_query(query, fetch=True)
+    
+    if vehicle_types:
+        st.markdown("### Current Vehicle Types")
+        
+        for vt in vehicle_types:
+            vt_id = vt['id']
+            
+            # Use a container with border
+            with st.container():
+                col1, col2, col3 = st.columns([3, 1, 1])
+                
+                with col1:
+                    status_icon = "Active" if vt['is_active'] else "Inactive"
+                    st.markdown(f"**{status_icon} {vt['display_name']}** (`{vt['type_name']}`)")
+                    if vt['capacity_description']:
+                        st.caption(f"{vt['capacity_description']}")
+                    st.caption(f"Sort Order: {vt['sort_order']}")
+                
+                with col2:
+                    if st.button("Edit", key=f"edit_vt_{vt_id}"):
+                        st.session_state[f"editing_vt_{vt_id}"] = True
+                        st.rerun()
+                
+                with col3:
+                    if vt['is_active']:
+                        if st.button("Deactivate", key=f"deactivate_vt_{vt_id}"):
+                            deactivate_vehicle_type(vt_id)
+                            st.rerun()
+                    else:
+                        if st.button("Activate", key=f"activate_vt_{vt_id}"):
+                            activate_vehicle_type(vt_id)
+                            st.rerun()
+                
+                # Edit form (shown when edit button is clicked)
+                if st.session_state.get(f"editing_vt_{vt_id}", False):
+                    st.markdown("---")
+                    edit_vehicle_type_form(vt)
+                
+                st.markdown("---")
+    else:
+        st.info("No vehicle types found. Add your first vehicle type above.")
+
+def add_vehicle_type_form():
+    """Form to add new vehicle type"""
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        type_name = st.text_input(
+            "Type Name* (for storage)",
+            placeholder="e.g., 7ft, 8ft, 14ft",
+            help="Short identifier used in database (lowercase, no spaces)",
+            key="new_vt_type_name"
+        )
+        
+        display_name = st.text_input(
+            "Display Name*",
+            placeholder="e.g., TATA ACE (7ft)",
+            help="User-friendly name shown in dropdowns",
+            key="new_vt_display_name"
+        )
+    
+    with col2:
+        capacity_description = st.text_input(
+            "Capacity Description",
+            placeholder="e.g., Up To 750Kg, 1 Plt, L7XW4.5XH4.75",
+            help="Optional capacity details",
+            key="new_vt_capacity"
+        )
+        
+        sort_order = st.number_input(
+            "Sort Order",
+            min_value=1,
+            value=10,
+            help="Lower numbers appear first in dropdowns",
+            key="new_vt_sort_order"
+        )
+    
+    if st.button("Add Vehicle Type", type="primary"):
+        if not type_name or not display_name:
+            st.error("Please fill in Type Name and Display Name")
+            return
+        
+        # Normalize type_name
+        normalized_type_name = type_name.strip().lower()
+        
+        from database import execute_query
+        
+        # Check if type_name already exists
+        check_query = "SELECT COUNT(*) as count FROM vehicle_types WHERE type_name = %s"
+        result = execute_query(check_query, (normalized_type_name,), fetch=True)
+        
+        if result and result[0]['count'] > 0:
+            st.error(f"Vehicle type '{normalized_type_name}' already exists!")
+            return
+        
+        # Insert new vehicle type
+        insert_query = """
+            INSERT INTO vehicle_types (type_name, display_name, capacity_description, sort_order, is_active)
+            VALUES (%s, %s, %s, %s, TRUE)
+        """
+        
+        if execute_query(insert_query, (
+            normalized_type_name,
+            display_name.strip(),
+            capacity_description.strip() if capacity_description else None,
+            int(sort_order)
+        )):
+            st.success(f"Vehicle type '{display_name}' added successfully!")
+            
+            # Clear form
+            for key in ['new_vt_type_name', 'new_vt_display_name', 'new_vt_capacity', 'new_vt_sort_order']:
+                if key in st.session_state:
+                    del st.session_state[key]
+            
+            st.rerun()
+        else:
+            st.error("Failed to add vehicle type. Please try again.")
+
+def edit_vehicle_type_form(vt):
+    """Form to edit existing vehicle type"""
+    st.markdown("### Edit Vehicle Type")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        new_type_name = st.text_input(
+            "Type Name*",
+            value=vt['type_name'],
+            help="Short identifier used in database",
+            key=f"edit_vt_type_name_{vt['id']}"
+        )
+        
+        new_display_name = st.text_input(
+            "Display Name*",
+            value=vt['display_name'],
+            help="User-friendly name shown in dropdowns",
+            key=f"edit_vt_display_name_{vt['id']}"
+        )
+    
+    with col2:
+        new_capacity = st.text_input(
+            "Capacity Description",
+            value=vt['capacity_description'] or "",
+            help="Optional capacity details",
+            key=f"edit_vt_capacity_{vt['id']}"
+        )
+        
+        new_sort_order = st.number_input(
+            "Sort Order",
+            min_value=1,
+            value=vt['sort_order'],
+            help="Lower numbers appear first",
+            key=f"edit_vt_sort_order_{vt['id']}"
+        )
+    
+    col_save, col_cancel = st.columns(2)
+    
+    with col_save:
+        if st.button("Save Changes", key=f"save_vt_{vt['id']}", type="primary"):
+            if not new_type_name or not new_display_name:
+                st.error("Type Name and Display Name are required")
+                return
+            
+            from database import execute_query
+            
+            # Normalize type_name
+            normalized_type_name = new_type_name.strip().lower()
+            
+            # Check if new type_name conflicts with existing (excluding current)
+            check_query = "SELECT COUNT(*) as count FROM vehicle_types WHERE type_name = %s AND id != %s"
+            result = execute_query(check_query, (normalized_type_name, vt['id']), fetch=True)
+            
+            if result and result[0]['count'] > 0:
+                st.error(f"Vehicle type '{normalized_type_name}' already exists!")
+                return
+            
+            # Update vehicle type
+            update_query = """
+                UPDATE vehicle_types 
+                SET type_name = %s, 
+                    display_name = %s, 
+                    capacity_description = %s, 
+                    sort_order = %s
+                WHERE id = %s
+            """
+            
+            if execute_query(update_query, (
+                normalized_type_name,
+                new_display_name.strip(),
+                new_capacity.strip() if new_capacity else None,
+                int(new_sort_order),
+                vt['id']
+            )):
+                st.success("Vehicle type updated successfully!")
+                del st.session_state[f"editing_vt_{vt['id']}"]
+                st.rerun()
+            else:
+                st.error("Failed to update vehicle type")
+    
+    with col_cancel:
+        if st.button("Cancel", key=f"cancel_vt_{vt['id']}"):
+            del st.session_state[f"editing_vt_{vt['id']}"]
+            st.rerun()
+
+def deactivate_vehicle_type(vt_id):
+    """Deactivate a vehicle type"""
+    from database import execute_query
+    
+    update_query = "UPDATE vehicle_types SET is_active = FALSE WHERE id = %s"
+    
+    if execute_query(update_query, (vt_id,)):
+        st.success("Vehicle type deactivated")
+    else:
+        st.error("Failed to deactivate vehicle type")
+
+def activate_vehicle_type(vt_id):
+    """Activate a vehicle type"""
+    from database import execute_query
+    
+    update_query = "UPDATE vehicle_types SET is_active = TRUE WHERE id = %s"
+    
+    if execute_query(update_query, (vt_id,)):
+        st.success("Vehicle type activated")
+    else:
+        st.error("Failed to activate vehicle type")
 
 def fuel_logs():
     """Manage fuel logs"""
@@ -571,7 +820,7 @@ def generate_vehicle_performance_report(month, year):
                 'Fuel Cost': f"₹{total_fuel_cost:,.2f}",
                 'KMPL': f"{kmpl:.2f}",
                 'L/100KM': f"{fuel_per_100km:.2f}",
-                'Overutilization': "🔴 Yes" if overutilization_flag else "🟢 No",
+                'Overutilization': "Yes" if overutilization_flag else "No",
                 'Fuel Entries': len(vehicle_fuel_logs),
                 'Odometer Entries': len(vehicle_odometer_logs)
             })

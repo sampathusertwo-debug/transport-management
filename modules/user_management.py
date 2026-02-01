@@ -1,4 +1,4 @@
-"""
+﻿"""
 User Management Module for Stranz Transport Management System
 Handles user creation, management, and authentication
 """
@@ -16,13 +16,13 @@ def show():
     
     # Check if user is admin
     if st.session_state.get('user_role') != 'Administrator':
-        st.error("🚫 Access Denied: Only administrators can manage users")
+        st.error("Access Denied: Only administrators can manage users")
         return
     
     st.markdown("### 👥 User Management")
     
     # Create two tabs: User List and Create User
-    tab1, tab2 = st.tabs(["👥 User List", "➕ Create New User"])
+    tab1, tab2 = st.tabs(["User List", "Create New User"])
     
     with tab2:
         show_create_user_form()
@@ -32,7 +32,7 @@ def show():
 
 def show_create_user_form():
     """Show the create user form"""
-    st.markdown("#### ➕ Create New User")
+    st.markdown("#### Create New User")
     
     # Initialize session state for form data persistence
     form_keys = ['form_username', 'form_first_name', 'form_last_name', 'form_email', 'form_mobile', 'form_role']
@@ -58,7 +58,7 @@ def show_create_user_form():
             last_name = st.text_input("Last Name*", value=st.session_state.form_last_name, placeholder="Enter last name")
             
             # Password generation section
-            st.markdown("##### 🔒 Password")
+            st.markdown("##### Password")
             col_pass1, col_pass2 = st.columns([2, 1])
             
             with col_pass1:
@@ -77,7 +77,7 @@ def show_create_user_form():
                 generate_button = st.form_submit_button("🎲 Generate", type="secondary")
                 
         # Form submission
-        submitted = st.form_submit_button("✅ Create User", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("Create User", type="primary", use_container_width=True)
         
         # Handle password generation
         if generate_button:
@@ -96,12 +96,12 @@ def show_create_user_form():
         if submitted:
             # Validate required fields
             if not all([username, first_name, last_name, email, password]):
-                st.error("❌ Please fill in all required fields marked with *")
+                st.error("Please fill in all required fields marked with *")
                 return
             
             # Validate email format
             if "@" not in email or "." not in email:
-                st.error("❌ Please enter a valid email address")
+                st.error("Please enter a valid email address")
                 return
             
             # Create user data
@@ -121,14 +121,14 @@ def show_create_user_form():
             
             if success:
                 st.success(f"✅ {message}")
-                st.info(f"🔑 **Temporary Password:** {password}")
-                st.info("📝 **Note:** User will be asked to change password on first login")
+                st.info(f"**Temporary Password:** {password}")
+                st.info("**Note:** User will be asked to change password on first login")
                 
                 # Additional success actions
                 st.markdown("---")
                 col1, col2 = st.columns(2)
                 with col1:
-                    if st.button("➕ Create Another User", key="create_another_user", type="primary"):
+                    if st.button("Create Another User", key="create_another_user", type="primary"):
                         # Keep the current form for creating another user
                         pass  # Form will be ready for next user
                 with col2:
@@ -158,7 +158,7 @@ def show_user_list():
     users = get_all_users()
     
     if not users:
-        st.info("📝 No users found. Create the first user using the 'Create New User' tab.")
+        st.info("No users found. Create the first user using the 'Create New User' tab.")
         return
     
     # User list with actions
@@ -170,8 +170,8 @@ def show_user_list():
             
             with col_info:
                 # User information display
-                status_icon = '✅' if user['is_active'] else '❌'
-                password_icon = '✅' if user['password_changed'] else '🔄'
+                status_icon = 'Active' if user['is_active'] else 'Disabled'
+                password_icon = 'Changed' if user['password_changed'] else 'Needs Change'
                 
                 st.markdown(f"""
                 **{user['first_name']} {user['last_name']}** {status_icon}
@@ -187,7 +187,7 @@ def show_user_list():
                 st.markdown("##### Actions")
                 
                 # Edit button
-                if st.button(f"✏️ Edit", key=f"edit_user_{user['id']}", type="secondary", use_container_width=True):
+                if st.button(f"Edit", key=f"edit_user_{user['id']}", type="secondary", use_container_width=True):
                     st.session_state[f'editing_user_{user["id"]}'] = True
                     st.session_state['current_edit_user'] = user
                     st.rerun()
@@ -198,7 +198,7 @@ def show_user_list():
                 if st.button(f"{status_icon} {status_text}", key=f"toggle_{user['id']}", use_container_width=True):
                     success, message = toggle_user_status(user['id'], not user['is_active'])
                     if success:
-                        st.success(f"✅ {message}")
+                        st.success(f"{message}")
                         if 'users' in st.session_state:
                             del st.session_state['users']
                         st.rerun()
@@ -206,7 +206,7 @@ def show_user_list():
                         st.error(f"❌ {message}")
                 
                 # Reset password button
-                if st.button(f"🔑 Reset Pwd", key=f"reset_{user['id']}", use_container_width=True):
+                if st.button(f"Reset Pwd", key=f"reset_{user['id']}", use_container_width=True):
                     new_password = generate_random_password()
                     success, message = reset_user_password(user['id'], new_password)
                     if success:
@@ -220,7 +220,7 @@ def show_user_list():
                         st.error(f"❌ {message}")
                 
                 # Delete button
-                if st.button(f"🗑️ Delete", key=f"delete_{user['id']}", type="secondary", use_container_width=True):
+                if st.button(f"Delete", key=f"delete_{user['id']}", type="secondary", use_container_width=True):
                     st.session_state[f'confirm_delete_{user["id"]}'] = True
                     st.rerun()
         
@@ -257,17 +257,17 @@ def show_user_list():
         
         with col3:
             # View user details button
-            if st.button("👁️ View Details", key="view_details"):
+            if st.button("View Details", key="view_details"):
                 show_user_details(selected_user)
         
         with col4:
             # Delete user button
-            if st.button("🗑️ Delete User", key="delete_user", type="secondary"):
+            if st.button("Delete User", key="delete_user", type="secondary"):
                 show_delete_confirmation(selected_user)
 
 def show_user_details(user):
     """Show detailed user information"""
-    st.markdown(f"#### 👤 User Details: {user['first_name']} {user['last_name']}")
+    st.markdown(f"#### User Details: {user['first_name']} {user['last_name']}")
     
     col1, col2 = st.columns(2)
     
@@ -275,12 +275,12 @@ def show_user_details(user):
         st.markdown(f"**Username:** {user['username']}")
         st.markdown(f"**Email:** {user['email']}")
         st.markdown(f"**Role:** {user['role']}")
-        st.markdown(f"**Status:** {'✅ Active' if user['is_active'] else '❌ Disabled'}")
+        st.markdown(f"**Status:** {'Active' if user['is_active'] else 'Disabled'}")
     
     with col2:
         st.markdown(f"**Mobile:** {user.get('mobile_number', 'N/A')}")
         st.markdown(f"**Created By:** {user.get('created_by', 'N/A')}")
-        st.markdown(f"**Password Changed:** {'✅ Yes' if user['password_changed'] else '🔄 No'}")
+        st.markdown(f"**Password Changed:** {'Yes' if user['password_changed'] else 'No'}")
         
         created_date = pd.to_datetime(user['created_date']).strftime('%Y-%m-%d %H:%M:%S') if user['created_date'] else 'N/A'
         st.markdown(f"**Created Date:** {created_date}")
@@ -291,17 +291,17 @@ def show_delete_confirmation(user):
         st.session_state[f"confirm_delete_{user['id']}"] = False
     
     if not st.session_state[f"confirm_delete_{user['id']}"]:
-        if st.button(f"⚠️ Confirm Delete: {user['first_name']} {user['last_name']}", key=f"confirm_delete_btn_{user['id']}"):
+        if st.button(f"Confirm Delete: {user['first_name']} {user['last_name']}", key=f"confirm_delete_btn_{user['id']}"):
             st.session_state[f"confirm_delete_{user['id']}"] = True
             st.rerun()
     else:
-        st.warning(f"⚠️ **Are you sure you want to delete user '{user['first_name']} {user['last_name']}'?**")
+        st.warning(f"**Are you sure you want to delete user '{user['first_name']} {user['last_name']}'?**")
         st.markdown("This action cannot be undone!")
         
         col1, col2 = st.columns(2)
         
         with col1:
-            if st.button("✅ Yes, Delete", key=f"final_delete_{user['id']}", type="primary"):
+            if st.button("Yes, Delete", key=f"final_delete_{user['id']}", type="primary"):
                 success, message = delete_user(user['id'])
                 
                 if success:
@@ -316,13 +316,13 @@ def show_delete_confirmation(user):
                     st.error(f"❌ {message}")
         
         with col2:
-            if st.button("❌ Cancel", key=f"cancel_delete_{user['id']}"):
+            if st.button("Cancel", key=f"cancel_delete_{user['id']}"):
                 del st.session_state[f"confirm_delete_{user['id']}"]
                 st.rerun()
 
 def show_edit_user_form(user):
     """Show edit user form"""
-    st.markdown(f"#### ✏️ Edit User: {user['first_name']} {user['last_name']}")
+    st.markdown(f"#### Edit User: {user['first_name']} {user['last_name']}")
     
     with st.form(f"edit_user_form_{user['id']}", clear_on_submit=False):
         col1, col2 = st.columns(2)
@@ -341,10 +341,10 @@ def show_edit_user_form(user):
         col_save, col_cancel = st.columns(2)
         
         with col_save:
-            save_clicked = st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
+            save_clicked = st.form_submit_button("Save Changes", type="primary", use_container_width=True)
         
         with col_cancel:
-            cancel_clicked = st.form_submit_button("❌ Cancel", use_container_width=True)
+            cancel_clicked = st.form_submit_button("Cancel", use_container_width=True)
         
         if save_clicked:
             # Validate required fields
@@ -392,13 +392,13 @@ def show_edit_user_form(user):
 
 def show_delete_confirmation_inline(user):
     """Show inline delete confirmation for a specific user"""
-    st.markdown(f"#### ⚠️ Delete User: {user['first_name']} {user['last_name']}")
+    st.markdown(f"#### Delete User: {user['first_name']} {user['last_name']}")
     st.warning("Are you sure you want to delete this user? This action cannot be undone!")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        if st.button("✅ Yes, Delete", key=f"final_delete_inline_{user['id']}", type="primary", use_container_width=True):
+        if st.button("Yes, Delete", key=f"final_delete_inline_{user['id']}", type="primary", use_container_width=True):
             success, message = delete_user(user['id'])
             
             if success:
@@ -414,7 +414,7 @@ def show_delete_confirmation_inline(user):
                 st.error(f"❌ {message}")
     
     with col2:
-        if st.button("❌ Cancel", key=f"cancel_delete_inline_{user['id']}", use_container_width=True):
+        if st.button("Cancel", key=f"cancel_delete_inline_{user['id']}", use_container_width=True):
             if f'confirm_delete_{user["id"]}' in st.session_state:
                 del st.session_state[f'confirm_delete_{user["id"]}']
             st.rerun()
@@ -435,7 +435,7 @@ def show_password_reset_popup():
             border: 2px solid #667eea;
         ">
             <h3 style="color: white; margin: 0 0 1rem 0; text-align: center;">
-                🔑 Password Reset Successful
+                Password Reset Successful
             </h3>
         </div>
         """, unsafe_allow_html=True)
@@ -444,7 +444,7 @@ def show_password_reset_popup():
         user_name = st.session_state.get('reset_user_name', 'User')
         new_password = st.session_state.get('reset_password_value', '')
         
-        st.success(f"✅ Password reset successfully for **{user_name}**!")
+        st.success(f"Password reset successfully for **{user_name}**!")
         
         # Password display section with copy functionality
         col_pass, col_copy, col_close = st.columns([3, 1, 1])
@@ -459,7 +459,7 @@ def show_password_reset_popup():
             )
         
         with col_copy:
-            if st.button("📋 Copy", key="copy_password_btn", type="secondary"):
+            if st.button("Copy", key="copy_password_btn", type="secondary"):
                 # JavaScript to copy to clipboard
                 st.markdown(f"""
                 <script>
@@ -468,10 +468,10 @@ def show_password_reset_popup():
                 }});
                 </script>
                 """, unsafe_allow_html=True)
-                st.success("📋 Copied!")
+                st.success("Copied!")
         
         with col_close:
-            if st.button("❌ Close", key="close_popup_btn", type="primary"):
+            if st.button("Close", key="close_popup_btn", type="primary"):
                 # Clear popup state
                 st.session_state['show_password_popup'] = False
                 if 'reset_password_value' in st.session_state:

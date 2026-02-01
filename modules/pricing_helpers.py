@@ -43,7 +43,7 @@ def get_pricing_widget(customer_name, origin, destination, vehicle_type):
     if pricing:
         # Display pricing in a nice format
         with st.container():
-            st.markdown("### 💰 Suggested Pricing")
+            st.markdown("### Suggested Pricing")
             col1, col2 = st.columns([2, 1])
             
             with col1:
@@ -118,8 +118,8 @@ def show_inline_pricing(customer_name, origin, destination, vehicle_type):
     )
     
     if pricing:
-        st.info(f"💰 Suggested Rate: **₹ {pricing['rate']:,.2f}** ({pricing.get('source', 'Unknown')})")
+        st.info(f"Suggested Rate: **₹ {pricing['rate']:,.2f}** ({pricing.get('source', 'Unknown')})")
         return pricing['rate']
     else:
-        st.warning("⚠️ No pricing found for this combination")
+        st.warning("No pricing found for this combination")
         return None

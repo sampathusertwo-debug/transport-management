@@ -407,6 +407,19 @@ def init_database():
             CREATE INDEX IF NOT EXISTS idx_notes_change_date ON notes(change_date);
         """)
         
+        # Create vehicle_types table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS vehicle_types (
+                id SERIAL PRIMARY KEY,
+                type_name VARCHAR(100) UNIQUE NOT NULL,
+                display_name VARCHAR(255),
+                capacity_description VARCHAR(255),
+                sort_order INTEGER DEFAULT 0,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
         # Create counters table for number generation
         cur.execute("""
             CREATE TABLE IF NOT EXISTS counters (
@@ -850,6 +863,154 @@ def delete_from_database(table_name, record_id):
     except Exception as e:
         st.error(f"Error deleting from {table_name}: {e}")
         return False
+
+def initialize_vehicle_types():
+    """Initialize vehicle types table with data from pricing"""
+    try:
+        # Check if already initialized
+        check_query = "SELECT COUNT(*) as count FROM vehicle_types"
+        result = execute_query(check_query, fetch=True)
+        
+        if result and result[0]['count'] > 0:
+            return True  # Already initialized
+        
+        # Standard vehicle types based on pricing data
+        vehicle_types = [
+            {"type_name": "7ft", "display_name": "TATA ACE (7ft)", "capacity_description": "Up To 750Kg, 1 Plt, L7XW4.5XH4.75", "sort_order": 1},
+            {"type_name": "8ft", "display_name": "DOSTT/BOLERO (8ft)", "capacity_description": "Up To 1.5 TON, 2 Plt, L8XW5XH6", "sort_order": 2},
+            {"type_name": "12ft", "display_name": "12FT Truck", "capacity_description": "Up To 2.5 TON", "sort_order": 3},
+            {"type_name": "14ft", "display_name": "14FT/407", "capacity_description": "Up To 3 TON, 3 Plt, L14XW6XH6", "sort_order": 4},
+            {"type_name": "17ft", "display_name": "17FT", "capacity_description": "Up To 4 TON, 4 Plt, L17XW6.5XH6.6", "sort_order": 5},
+            {"type_name": "20ft", "display_name": "20FT", "capacity_description": "Up To 6 TON, 10 Plt, L20XW8XH8", "sort_order": 6},
+            {"type_name": "24ft", "display_name": "24FT Truck", "capacity_description": "Up To 8 TON", "sort_order": 7},
+            {"type_name": "32ft", "display_name": "32FT Truck", "capacity_description": "Up To 12 TON", "sort_order": 8},
+        ]
+        
+        # Insert vehicle types
+        for vtype in vehicle_types:
+            insert_query = """
+                INSERT INTO vehicle_types (type_name, display_name, capacity_description, sort_order)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (type_name) DO NOTHING
+            """
+            execute_query(insert_query, (
+                vtype['type_name'],
+                vtype['display_name'],
+                vtype['capacity_description'],
+                vtype['sort_order']
+            ))
+        
+        return True
+    except Exception as e:
+        st.error(f"Error initializing vehicle types: {e}")
+        return False
+
+def get_vehicle_types():
+    """Get all active vehicle types with display names"""
+    try:
+        query = """
+            SELECT type_name, display_name, capacity_description 
+            FROM vehicle_types 
+            WHERE is_active = TRUE 
+            ORDER BY sort_order
+        """
+        result = execute_query(query, fetch=True)
+        
+        if result:
+            return [vt['display_name'] if vt['display_name'] else vt['type_name'] for vt in result]
+        else:
+            # Fallback to hardcoded list if table doesn't exist or is empty
+            return ["TATA ACE (7ft)", "DOSTT/BOLERO (8ft)", "12FT Truck", "14FT/407", "17FT", "20FT", "24FT Truck", "32FT Truck"]
+    except Exception as e:
+        # Fallback to hardcoded list on error
+        return ["TATA ACE (7ft)", "DOSTT/BOLERO (8ft)", "12FT Truck", "14FT/407", "17FT", "20FT", "24FT Truck", "32FT Truck"]
+
+def get_vehicle_type_mapping():
+    """Get mapping of display names to type names for storage"""
+    try:
+        query = """
+            SELECT type_name, display_name 
+            FROM vehicle_types 
+            WHERE is_active = TRUE 
+            ORDER BY sort_order
+        """
+        result = execute_query(query, fetch=True)
+        
+        if result:
+            mapping = {}
+            for vt in result:
+                display = vt['display_name'] if vt['display_name'] else vt['type_name']
+                mapping[display] = vt['type_name']
+            return mapping
+        else:
+            # Fallback mapping
+            return {
+                "TATA ACE (7ft)": "7ft",
+                "DOSTT/BOLERO (8ft)": "8ft",
+                "12FT Truck": "12ft",
+                "14FT/407": "14ft",
+                "17FT": "17ft",
+                "20FT": "20ft",
+                "24FT Truck": "24ft",
+                "32FT Truck": "32ft"
+            }
+    except Exception as e:
+        # Fallback mapping
+        return {
+            "TATA ACE (7ft)": "7ft",
+            "DOSTT/BOLERO (8ft)": "8ft",
+            "12FT Truck": "12ft",
+            "14FT/407": "14ft",
+            "17FT": "17ft",
+            "20FT": "20ft",
+            "24FT Truck": "24ft",
+            "32FT Truck": "32ft"
+        }
+
+def normalize_vehicle_type(display_name):
+    """Convert display name to storage type_name"""
+    mapping = get_vehicle_type_mapping()
+    return mapping.get(display_name, display_name)
+
+def get_vehicle_display_name(type_name):
+    """Convert storage type_name to display name"""
+    try:
+        query = """
+            SELECT display_name 
+            FROM vehicle_types 
+            WHERE type_name = %s AND is_active = TRUE
+        """
+        result = execute_query(query, (type_name,), fetch=True)
+        
+        if result and result[0].get('display_name'):
+            return result[0]['display_name']
+        else:
+            # Fallback mapping
+            reverse_mapping = {
+                "7ft": "TATA ACE (7ft)",
+                "8ft": "DOSTT/BOLERO (8ft)",
+                "12ft": "12FT Truck",
+                "14ft": "14FT/407",
+                "17ft": "17FT",
+                "20ft": "20FT",
+                "24ft": "24FT Truck",
+                "32ft": "32FT Truck"
+            }
+            return reverse_mapping.get(type_name, type_name)
+    except Exception as e:
+        # Fallback mapping
+        reverse_mapping = {
+            "7ft": "TATA ACE (7ft)",
+            "8ft": "DOSTT/BOLERO (8ft)",
+            "12ft": "12FT Truck",
+            "14ft": "14FT/407",
+            "17ft": "17FT",
+            "20ft": "20FT",
+            "24ft": "24FT Truck",
+            "32ft": "32FT Truck"
+        }
+        return reverse_mapping.get(type_name, type_name)
+
 
 def get_next_counter_value(counter_name):
     """Get next counter value and increment"""
