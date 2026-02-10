@@ -117,7 +117,7 @@ def format_booking_details(booking):
     details.append(f"Vehicle Type: {booking.get('vehicle_type', 'N/A')}")
     route_display = f"{booking.get('route_from', 'N/A')} → {booking.get('route_to', 'N/A')}"
     details.append(f"Route: {route_display}")
-    details.append("\n🚛 VEHICLE & DRIVER DETAILS")
+    details.append("\nVEHICLE & DRIVER DETAILS")
     details.append(f"Reg No: {booking.get('vehicle_reg_no', 'Not assigned')}")
     details.append(f"Driver: {booking.get('driver', 'Not assigned')}")
     details.append(f"Phone: {booking.get('driver_phone', 'Not provided')}")
@@ -138,7 +138,7 @@ def format_quotation_details(quotation):
     details.append(f"Vehicle Type: {quotation.get('vehicle_type', 'N/A')}")
     route_display = f"{quotation.get('route_from', 'N/A')} → {quotation.get('route_to', 'N/A')}"
     details.append(f"Route: {route_display}")
-    details.append("\n🚛 VEHICLE & DRIVER DETAILS")
+    details.append("\nVEHICLE & DRIVER DETAILS")
     details.append(f"Reg No: {quotation.get('vehicle_reg_no', 'Not assigned')}")
     details.append(f"Driver: {quotation.get('driver', 'Not assigned')}")
     details.append(f"Phone: {quotation.get('driver_phone', 'Not provided')}")
@@ -175,7 +175,7 @@ def copy_to_clipboard_button(label, text_to_copy, key=None):
     <button onclick="copyToClipboard(`{text_to_copy.replace(chr(96), chr(39)).replace(chr(10), '\\n')}`)" 
             style="padding: 10px 20px; background-color: #0078d4; color: white; border: none; 
                    border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 14px;">
-        📋 {label}
+        {label}
     </button>
     """
     

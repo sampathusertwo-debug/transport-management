@@ -242,7 +242,7 @@ def show_user_list():
         st.rerun()
         
         # Important notes
-        st.info("📝 **Important Notes:**")
+        st.info("**Important Notes:**")
         st.markdown("""
         - Share this password securely with the user
         - User will be asked to change this password on next login
@@ -481,7 +481,7 @@ def show_password_reset_popup():
                 st.rerun()
         
         # Important notes
-        st.info("📝 **Important Notes:**")
+        st.info("**Important Notes:**")
         st.markdown("""
         - Share this password securely with the user
         - User will be asked to change this password on next login

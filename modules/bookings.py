@@ -419,77 +419,8 @@ def create_booking():
                     refresh_data('customers')
                     load_data_when_needed('customers')
         
-        # Check if driver exists, if not create it
-        if driver and hasattr(st.session_state, 'drivers'):
-            existing_driver = next((d for d in st.session_state.drivers if d['name'].lower() == driver.lower()), None)
-            if not existing_driver:
-                # Create new driver
-                from database import add_to_database
-                import uuid
-                new_driver_data = {
-                    'id': str(uuid.uuid4()),
-                    'name': driver.title(),
-                    'phone': driver_phone,
-                    'status': 'Available',
-                    'created_date': datetime.datetime.now()
-                }
-                driver_id = add_to_database('drivers', new_driver_data)
-                if driver_id:
-                    st.success(f"New driver '{driver}' added successfully!")
-                    # Refresh driver list
-                    from database import refresh_data
-                    refresh_data('drivers')
-                    load_data_when_needed('drivers')
-        
-        # Check if vehicle exists, if not create it
-        if vehicle_reg_no and hasattr(st.session_state, 'vehicles'):
-            existing_vehicle = next((v for v in st.session_state.vehicles if v['registration_number'].lower() == vehicle_reg_no.lower()), None)
-            if not existing_vehicle:
-                # Check if vendor needs to be created
-                vendor_id = None
-                if st.session_state.get('booking_new_vehicle_vendor') == "➕ Add New Vendor":
-                    vendor_name = st.session_state.get('booking_new_vendor_name', '')
-                    if vendor_name:
-                        # Create new vendor
-                        from database import add_to_database
-                        import uuid
-                        new_vendor_data = {
-                            'id': str(uuid.uuid4()),
-                            'name': vendor_name.title(),
-                            'vendor_type': 'Vehicle Vendor',
-                            'created_date': datetime.datetime.now()
-                        }
-                        vendor_id = add_to_database('vendors', new_vendor_data)
-                        if vendor_id:
-                            st.success(f"New vendor '{vendor_name}' added successfully!")
-                            # Refresh vendor list
-                            from database import refresh_data
-                            refresh_data('vendors')
-                            load_data_when_needed('vendors')
-                elif st.session_state.get('booking_new_vehicle_vendor') and st.session_state.get('booking_new_vehicle_vendor') not in ["None", "➕ Add New Vendor"]:
-                    # Use existing vendor
-                    vendor_name = st.session_state.get('booking_new_vehicle_vendor')
-                    existing_vendor = next((v for v in st.session_state.vendors if v['name'] == vendor_name), None)
-                    if existing_vendor:
-                        vendor_id = existing_vendor['id']
-                
-                # Create new vehicle
-                from database import add_to_database
-                import uuid
-                new_vehicle_data = {
-                    'id': str(uuid.uuid4()),
-                    'registration_number': vehicle_reg_no.upper(),
-                    'vehicle_type': vehicle_type,
-                    'status': 'Active',
-                    'created_date': datetime.datetime.now()
-                }
-                vehicle_id = add_to_database('vehicles', new_vehicle_data)
-                if vehicle_id:
-                    st.success(f"New vehicle '{vehicle_reg_no}' added successfully!")
-                    # Refresh vehicle list
-                    from database import refresh_data
-                    refresh_data('vehicles')
-                    load_data_when_needed('vehicles')
+        # Note: Vehicle registration, driver, and vendor are saved in booking details only
+        # They are NOT automatically added to the master records
         
         # Create booking data
         booking_data = {
@@ -778,77 +709,8 @@ def create_cash_booking():
                         refresh_data('customers')
                         load_data_when_needed('customers')
         
-        # Check if driver exists, if not create it
-        if driver and hasattr(st.session_state, 'drivers'):
-            existing_driver = next((d for d in st.session_state.drivers if d['name'].lower() == driver.lower()), None)
-            if not existing_driver:
-                # Create new driver
-                from database import add_to_database
-                import uuid
-                new_driver_data = {
-                    'id': str(uuid.uuid4()),
-                    'name': driver.title(),
-                    'phone': driver_phone,
-                    'status': 'Available',
-                    'created_date': datetime.datetime.now()
-                }
-                driver_id = add_to_database('drivers', new_driver_data)
-                if driver_id:
-                    st.success(f"New driver '{driver}' added successfully!")
-                    # Refresh driver list
-                    from database import refresh_data
-                    refresh_data('drivers')
-                    load_data_when_needed('drivers')
-        
-        # Check if vehicle exists, if not create it
-        if vehicle_reg_no and hasattr(st.session_state, 'vehicles'):
-            existing_vehicle = next((v for v in st.session_state.vehicles if v['registration_number'].lower() == vehicle_reg_no.lower()), None)
-            if not existing_vehicle:
-                # Check if vendor needs to be created
-                vendor_id = None
-                if st.session_state.get('cash_booking_new_vehicle_vendor') == "➕ Add New Vendor":
-                    vendor_name = st.session_state.get('cash_booking_new_vendor_name', '')
-                    if vendor_name:
-                        # Create new vendor
-                        from database import add_to_database
-                        import uuid
-                        new_vendor_data = {
-                            'id': str(uuid.uuid4()),
-                            'name': vendor_name.title(),
-                            'vendor_type': 'Vehicle Vendor',
-                            'created_date': datetime.datetime.now()
-                        }
-                        vendor_id = add_to_database('vendors', new_vendor_data)
-                        if vendor_id:
-                            st.success(f"New vendor '{vendor_name}' added successfully!")
-                            # Refresh vendor list
-                            from database import refresh_data
-                            refresh_data('vendors')
-                            load_data_when_needed('vendors')
-                elif st.session_state.get('cash_booking_new_vehicle_vendor') and st.session_state.get('cash_booking_new_vehicle_vendor') not in ["None", "➕ Add New Vendor"]:
-                    # Use existing vendor
-                    vendor_name = st.session_state.get('cash_booking_new_vehicle_vendor')
-                    existing_vendor = next((v for v in st.session_state.vendors if v['name'] == vendor_name), None)
-                    if existing_vendor:
-                        vendor_id = existing_vendor['id']
-                
-                # Create new vehicle
-                from database import add_to_database
-                import uuid
-                new_vehicle_data = {
-                    'id': str(uuid.uuid4()),
-                    'registration_number': vehicle_reg_no.upper(),
-                    'vehicle_type': vehicle_type,
-                    'status': 'Active',
-                    'created_date': datetime.datetime.now()
-                }
-                vehicle_id = add_to_database('vehicles', new_vehicle_data)
-                if vehicle_id:
-                    st.success(f"New vehicle '{vehicle_reg_no}' added successfully!")
-                    # Refresh vehicle list
-                    from database import refresh_data
-                    refresh_data('vehicles')
-                    load_data_when_needed('vehicles')
+        # Note: Vehicle registration, driver, and vendor are saved in booking details only
+        # They are NOT automatically added to the master records
         
         # Create booking data
         from database import normalize_vehicle_type

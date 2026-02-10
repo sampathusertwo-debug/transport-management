@@ -41,7 +41,7 @@ def show():
     st.markdown("---")
     
     # Export options
-    st.markdown("### 📋 Select Data to Export")
+    st.markdown("### Select Data to Export")
     
     col1, col2 = st.columns(2)
     
@@ -101,7 +101,7 @@ def preview_data_counts(from_date, to_date):
     """Preview data counts for the selected period"""
     st.markdown('''
     <div class="section-header">
-        📊 Data Preview
+        Data Preview
     </div>
     ''', unsafe_allow_html=True)
     

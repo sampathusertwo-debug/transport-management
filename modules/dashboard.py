@@ -60,7 +60,7 @@ def show():
     # Show helpful message if no data found
     if (metrics['total_bookings'] == 0 and metrics['total_revenue'] == 0 and 
         metrics['total_receipts'] == 0 and metrics['pending_billings'] == 0):
-        st.info(f"📊 No data found for the selected period ({metrics['from_date'].strftime('%d %b %Y')} to {metrics['to_date'].strftime('%d %b %Y')}). Try changing the period filter above or check if there are bookings for different date ranges.")
+        st.info(f"No data found for the selected period ({metrics['from_date'].strftime('%d %b %Y')} to {metrics['to_date'].strftime('%d %b %Y')}). Try changing the period filter above or check if there are bookings for different date ranges.")
     
     # Display recent bookings table
     display_recent_bookings_table(from_date, to_date)
@@ -347,7 +347,7 @@ def display_detailed_data(from_date, to_date):
     st.markdown("---")
     st.markdown('''
     <div class="section-header">
-        📋 Detailed Data
+        Detailed Data
     </div>
     ''', unsafe_allow_html=True)
     

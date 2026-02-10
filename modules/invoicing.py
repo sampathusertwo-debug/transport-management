@@ -126,7 +126,7 @@ def create_invoice():
             status_text = f"✅ Already Invoiced ({existing_invoice['invoice_number']})"
             disabled = True
         else:
-            status_text = "📋 Ready to Invoice"
+            status_text = "Ready to Invoice"
             disabled = False
         
         with st.expander(f"{status_text} - {booking['booking_number']} - {booking['customer_name']} - ₹{booking['total_amount']:,.2f}"):
@@ -384,9 +384,9 @@ def create_invoice_from_booking(booking):
         # Show GST breakdown
         st.markdown(f"**GST Breakdown ({gst_type}):**")
         if additional_charges > 0:
-            st.info(f"📝 GST applied only to base amount (₹{booking_base:,.2f}) + additional charges (₹{additional_charges:,.2f})")
+            st.info(f"GST applied only to base amount (₹{booking_base:,.2f}) + additional charges (₹{additional_charges:,.2f})")
         else:
-            st.info(f"📝 GST applied to booking base amount (₹{booking_base:,.2f})")
+            st.info(f"GST applied to booking base amount (₹{booking_base:,.2f})")
             
         if gst_type == "CGST+SGST":
             cgst = sgst = gst_amount / 2
@@ -404,7 +404,7 @@ def create_invoice_from_booking(booking):
         gst_type = "From Booking"
         total_amount = float(subtotal + gst_amount)
         
-        st.info(f"📝 Using booking's GST: ₹{gst_amount:,.2f} ({gst_rate}%)")
+        st.info(f"Using booking's GST: ₹{gst_amount:,.2f} ({gst_rate}%)")
         
     else:
         # No GST applicable
@@ -819,7 +819,7 @@ def view_invoices():
             # Show detailed view if requested
             if st.session_state.get(f"show_invoice_details_{invoice['id']}", False):
                 st.markdown("---")
-                st.markdown("**📋 Detailed Invoice Breakdown:**")
+                st.markdown("**Detailed Invoice Breakdown:**")
                 
                 # Invoice information
                 detail_col1, detail_col2, detail_col3 = st.columns(3)

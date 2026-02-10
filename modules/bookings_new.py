@@ -25,7 +25,7 @@ def show_success_page(title, message, created_item_id=None, created_item_number=
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        if st.button(f"➕ Create Another {module_name.title().rstrip('s')}", type="primary", use_container_width=True):
+        if st.button(f"Create Another {module_name.title().rstrip('s')}", type="primary", use_container_width=True):
             # Clear any success flags and return to create mode
             if 'show_success_page' in st.session_state:
                 del st.session_state['show_success_page']
@@ -34,7 +34,7 @@ def show_success_page(title, message, created_item_id=None, created_item_number=
             st.rerun()
     
     with col2:
-        if st.button(f"👀 View All {module_name.title()}", use_container_width=True):
+        if st.button(f"View All {module_name.title()}", use_container_width=True):
             # Navigate to view/list mode
             if 'show_success_page' in st.session_state:
                 del st.session_state['show_success_page']
@@ -45,7 +45,7 @@ def show_success_page(title, message, created_item_id=None, created_item_number=
             st.rerun()
     
     with col3:
-        if st.button("🏠 Go to Dashboard", use_container_width=True):
+        if st.button("Go to Dashboard", use_container_width=True):
             # Clear success state and go to dashboard
             if 'show_success_page' in st.session_state:
                 del st.session_state['show_success_page']
@@ -104,7 +104,7 @@ def show():
     load_data_when_needed('vehicles')
     load_data_when_needed('drivers')
     
-    st.header("📦 Bookings Management")
+    st.header("Bookings Management")
     
     # Handle tab switching from success page
     active_tab_index = 2 if st.session_state.get('active_tab') == "view" else 0
@@ -131,7 +131,7 @@ def create_booking():
     st.info(f"**Booking Number:** {booking_number}")
     
     # Simple booking form
-    st.markdown("**📋 BOOKING DETAILS**")
+    st.markdown("**BOOKING DETAILS**")
     col1, col2 = st.columns(2)
     
     with col1:
@@ -147,7 +147,7 @@ def create_booking():
         route_from = st.text_input("Route From*", placeholder="e.g., Mepz", key="booking_route_from")
         route_to = st.text_input("Route To*", placeholder="e.g., Airport", key="booking_route_to")
     
-    st.markdown("**🚛 VEHICLE & DRIVER DETAILS**")
+    st.markdown("**VEHICLE & DRIVER DETAILS**")
     col1, col2 = st.columns(2)
     
     with col1:
@@ -160,7 +160,7 @@ def create_booking():
                              index=1, key="booking_status")  # Default to CONFIRMED
     
     # Submit button
-    if st.button("💾 Create Booking", type="primary", use_container_width=True):
+    if st.button("Create Booking", type="primary", use_container_width=True):
         # Validation
         if not customer or not booking_date or not vehicle_type or not route_from or not route_to or not vehicle_reg_no or not driver_phone:
             st.error("❌ Please fill all required fields marked with *")
@@ -221,15 +221,15 @@ def create_booking():
 def create_cash_booking():
     """Create cash booking - same as regular booking for now"""
     st.subheader("Create Cash Booking")
-    st.info("📋 Cash booking uses the same simplified form as regular booking.")
+    st.info("Cash booking uses the same simplified form as regular booking.")
     create_booking()
 
 def view_bookings():
     """View and manage existing simplified bookings"""
-    st.subheader("📋 View Bookings")
+    st.subheader("View Bookings")
     
     if not st.session_state.bookings:
-        st.info("📝 No bookings found. Create your first booking in the 'Create Booking' tab.")
+        st.info("No bookings found. Create your first booking in the 'Create Booking' tab.")
         return
     
     # Remove duplicates based on booking_number
@@ -255,7 +255,7 @@ def view_bookings():
         date_from = st.date_input("From Date", value=datetime.datetime.now().date() - datetime.timedelta(days=30))
     
     with col4:
-        st.metric("📊 Total Bookings", len(st.session_state.bookings))
+        st.metric("Total Bookings", len(st.session_state.bookings))
     
     # Apply filters
     filtered_bookings = st.session_state.bookings
@@ -271,7 +271,7 @@ def view_bookings():
     
     # Display bookings in cards
     if filtered_bookings:
-        st.markdown(f"**📋 Showing {len(filtered_bookings)} bookings**")
+        st.markdown(f"**Showing {len(filtered_bookings)} bookings**")
         
         for booking in filtered_bookings:
             # Status color coding
@@ -289,7 +289,7 @@ def view_bookings():
                 detail_col1, detail_col2 = st.columns(2)
                 
                 with detail_col1:
-                    st.markdown("**📋 BOOKING DETAILS**")
+                    st.markdown("**BOOKING DETAILS**")
                     st.write(f"**Booking No:** {booking.get('booking_number', 'N/A')}")
                     st.write(f"**Customer:** {booking.get('customer', 'N/A')}")
                     st.write(f"**Date:** {booking.get('booking_date', 'N/A')}")
@@ -297,7 +297,7 @@ def view_bookings():
                     st.write(f"**Route:** {booking.get('route_from', 'N/A')} to {booking.get('route_to', 'N/A')}")
                     
                 with detail_col2:
-                    st.markdown("**🚛 VEHICLE & DRIVER DETAILS**")
+                    st.markdown("**VEHICLE & DRIVER DETAILS**")
                     st.write(f"**Reg No:** {booking.get('vehicle_reg_no', 'Not assigned')}")
                     st.write(f"**Driver:** {booking.get('driver', 'Not assigned')}")
                     st.write(f"**Phone:** {booking.get('driver_phone', 'Not provided')}")
@@ -311,13 +311,13 @@ def view_bookings():
                 
                 copy_col1, copy_col2 = st.columns([1, 5])
                 with copy_col1:
-                    if st.button(f"📋 Copy", key=f"copy_{booking.get('id', booking.get('booking_number'))}", use_container_width=True):
+                    if st.button(f"Copy", key=f"copy_{booking.get('id', booking.get('booking_number'))}", use_container_width=True):
                         import pyperclip
                         try:
                             pyperclip.copy(booking_text)
                             st.success("✅ Copied to clipboard!")
                         except:
-                            st.info("📋 Booking details ready to copy")
+                            st.info("Booking details ready to copy")
                 
                 # Action buttons
                 st.markdown("**⚡ Actions:**")
@@ -388,7 +388,7 @@ def view_bookings():
                     edit_action_col1, edit_action_col2 = st.columns(2)
                     
                     with edit_action_col1:
-                        if st.button(f"💾 Save Changes", key=f"save_{booking_id}", type="primary"):
+                        if st.button(f"Save Changes", key=f"save_{booking_id}", type="primary"):
                             # Update booking
                             for i, b in enumerate(st.session_state.bookings):
                                 if b.get('id', b.get('booking_number')) == booking_id:

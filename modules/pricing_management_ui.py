@@ -354,10 +354,21 @@ def bulk_upload_update():
         ### Required CSV Columns:
         - `origin` - Origin location (e.g., CHENNAI AIRPORT)
         - `destination` - Destination location (e.g., MAHINDRA CITY)
-        - `vehicle_type` - Vehicle type (e.g., 7ft, 8ft, 14ft)
+        - `vehicle_type` - Vehicle type (e.g., 7ft, TATA ACE, 8ft, 14ft) - will be auto-normalized
         - `rate` - Price rate (numeric)
         - `unloading_free_time` - Free unloading time in minutes (optional)
         - `halting_charge` - Halting charge per hour (optional)
+        
+        ### Supported Vehicle Types:
+        You can use any of these formats (will be normalized automatically):
+        - **7ft vehicles:** TATA ACE, ACE, 7ft, 7 ft
+        - **8ft vehicles:** DOSTT, BOLERO, DOST, 8ft, 8 ft
+        - **12ft vehicles:** 12ft, 12 ft
+        - **14ft vehicles:** 14ft, 14 ft, 407
+        - **17ft vehicles:** 17ft, 17 ft
+        - **20ft vehicles:** 20ft, 20 ft
+        - **24ft vehicles:** 24ft, 24 ft
+        - **32ft vehicles:** 32ft, 32 ft
         
         ### Process:
         1. Upload your CSV file
@@ -535,6 +546,58 @@ def show_bulk_upload_preview():
             )
             existing_dict[key] = float(row['rate'])
     
+    # Helper function to normalize vehicle type names
+    def normalize_uploaded_vehicle_type(uploaded_type):
+        """Normalize uploaded vehicle type to match database storage format"""
+        uploaded_type = str(uploaded_type).strip()
+        uploaded_upper = uploaded_type.upper()
+        
+        # Try exact match with display names first
+        from database import get_vehicle_type_mapping
+        mapping = get_vehicle_type_mapping()
+        
+        # Check if it matches a display name
+        if uploaded_type in mapping:
+            return mapping[uploaded_type]
+        
+        # Check uppercase version
+        for display_name, type_name in mapping.items():
+            if display_name.upper() == uploaded_upper:
+                return type_name
+        
+        # Common variations mapping
+        variations = {
+            'TATA ACE': '7ft',
+            'TATAACE': '7ft',
+            'ACE': '7ft',
+            '7FT': '7ft',
+            '7 FT': '7ft',
+            'DOSTT': '8ft',
+            'BOLERO': '8ft',
+            'DOST': '8ft',
+            '8FT': '8ft',
+            '8 FT': '8ft',
+            '12FT': '12ft',
+            '12 FT': '12ft',
+            '14FT': '14ft',
+            '14 FT': '14ft',
+            '407': '14ft',
+            '17FT': '17ft',
+            '17 FT': '17ft',
+            '20FT': '20ft',
+            '20 FT': '20ft',
+            '24FT': '24ft',
+            '24 FT': '24ft',
+            '32FT': '32ft',
+            '32 FT': '32ft'
+        }
+        
+        if uploaded_upper in variations:
+            return variations[uploaded_upper]
+        
+        # If no match found, return lowercase version
+        return uploaded_type.lower()
+    
     # Analyze changes
     additions = []
     updates = []
@@ -543,7 +606,7 @@ def show_bulk_upload_preview():
     for idx, row in df.iterrows():
         origin = str(row['origin']).strip().upper()
         destination = str(row['destination']).strip().upper()
-        vehicle_type = str(row['vehicle_type']).strip().lower()
+        vehicle_type = normalize_uploaded_vehicle_type(row['vehicle_type'])
         new_rate = float(row['rate'])
         
         key = (origin, destination, vehicle_type)
@@ -601,7 +664,9 @@ def show_bulk_upload_preview():
                 df_additions,
                 use_container_width=True,
                 column_config={
-                    "rate": st.column_config.NumberColumn("Rate", format="₹ %.2f")
+                    "rate": st.column_config.NumberColumn("Rate", format="₹ %.2f"),
+                    "halting_charge": st.column_config.NumberColumn("Halting Charge", format="₹ %.2f"),
+                    "unloading_free_time": st.column_config.TextColumn("Free Time")
                 }
             )
     
@@ -614,7 +679,9 @@ def show_bulk_upload_preview():
                 column_config={
                     "old_rate": st.column_config.NumberColumn("Old Rate", format="₹ %.2f"),
                     "new_rate": st.column_config.NumberColumn("New Rate", format="₹ %.2f"),
-                    "difference": st.column_config.NumberColumn("Difference", format="₹ %.2f")
+                    "difference": st.column_config.NumberColumn("Difference", format="₹ %.2f"),
+                    "halting_charge": st.column_config.NumberColumn("Halting Charge", format="₹ %.2f"),
+                    "unloading_free_time": st.column_config.TextColumn("Free Time")
                 }
             )
     
@@ -654,10 +721,10 @@ def apply_bulk_changes(is_default):
             for item in additions:
                 insert_query = """
                     INSERT INTO default_pricing (
-                        id, origin, destination, vehicle_type, customer_rate, 
+                        origin, destination, vehicle_type, customer_rate, 
                         vendor_rate, is_active, created_date
                     )
-                    VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, TRUE, NOW())
+                    VALUES (%s, %s, %s, %s, %s, TRUE, NOW())
                 """
                 if execute_query(insert_query, (
                     item['origin'],
@@ -704,10 +771,10 @@ def apply_bulk_changes(is_default):
             for item in additions:
                 insert_query = """
                     INSERT INTO customer_specific_pricing (
-                        id, customer_id, origin, destination, vehicle_type, rate,
+                        customer_id, origin, destination, vehicle_type, rate,
                         unloading_free_time, halting_charge, is_active, created_date
                     )
-                    VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s, TRUE, NOW())
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE, NOW())
                 """
                 if execute_query(insert_query, (
                     customer_id,

@@ -477,7 +477,7 @@ def show_status_timeline(record_id: str, record_type: str):
         record_id: ID of the record
         record_type: Type of record
     """
-    st.markdown("### 📊 Status Timeline")
+    st.markdown("### Status Timeline")
     
     history = get_status_history(record_id, record_type)
     
@@ -506,7 +506,7 @@ def show_status_timeline(record_id: str, record_type: str):
             if note['notes']:
                 st.markdown(f"*{note['notes']}*")
             if note['additional_data']:
-                st.markdown(f"📝 Additional info: {note['additional_data']}")
+                st.markdown(f"Additional info: {note['additional_data']}")
         
         with col3:
             st.markdown(f"*by {note['changed_by']}*")
@@ -577,7 +577,7 @@ def show():
         # Don't load all notes into session state - we'll query as needed
         st.session_state.notes_lookup_data_loaded = True
     
-    st.header("📝 Notes & Status Tracking")
+    st.header("Notes & Status Tracking")
     
     # Initialize notes if not exists (for backward compatibility)
     if 'notes' not in st.session_state:
@@ -601,7 +601,7 @@ def show_activity_dashboard():
     """Show recent activity dashboard with pagination"""
     col1, col2 = st.columns([3, 1])
     with col1:
-        st.subheader("📊 Recent Activity Dashboard")
+        st.subheader("Recent Activity Dashboard")
     with col2:
         if st.button("🔄 Refresh", key="refresh_activity", help="Refresh activity data"):
             # Clear pagination state to force refresh
@@ -748,7 +748,7 @@ def show_activity_dashboard():
             st.rerun()
     
     # Display notes
-    st.markdown("### 📋 Activity Records")
+    st.markdown("### Activity Records")
     
     for note in notes:
         record_info = get_record_info(note['record_id'], note['record_type'])

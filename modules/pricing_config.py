@@ -21,9 +21,9 @@ def pricing_settings_page():
     
     # Main tabs
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📊 Pricing Matrix",
+        "Pricing Matrix",
         "🛣️ Routes",
-        "🚛 Vehicle Types",
+        "Vehicle Types",
         "⚙️ Set Pricing",
         "📥 Import from Excel"
     ])
@@ -92,7 +92,7 @@ def pricing_settings_page():
                     st.error("Please fill in all required fields")
         
         with col2:
-            st.subheader("📋 Existing Routes")
+            st.subheader("Existing Routes")
             routes = get_all_routes()
             if routes:
                 routes_df = pd.DataFrame(routes)
@@ -138,7 +138,7 @@ def pricing_settings_page():
                     st.error("Please enter vehicle type name")
         
         with col2:
-            st.subheader("📋 Existing Vehicle Types")
+            st.subheader("Existing Vehicle Types")
             vehicle_types = get_all_vehicle_types()
             if vehicle_types:
                 vtype_df = pd.DataFrame(vehicle_types)
@@ -189,7 +189,7 @@ def pricing_settings_page():
             col_btn1, col_btn2 = st.columns(2)
             
             with col_btn1:
-                if st.button("💾 Set Pricing", key="set_price_btn"):
+                if st.button("Set Pricing", key="set_price_btn"):
                     if set_pricing(route_id, vehicle_type_id, price):
                         st.success(f"✅ Price set: ₹{price:,.2f}")
             

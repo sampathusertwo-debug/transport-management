@@ -1111,7 +1111,7 @@ def manage_customers():
                 save_col, cancel_col = st.columns(2)
                 
                 with save_col:
-                    if st.button(f"💾 Save Changes", key=f"save_customer_{customer['id']}", type="primary"):
+                    if st.button(f"Save Changes", key=f"save_customer_{customer['id']}", type="primary"):
                         # Update customer data
                         customer['name'] = new_name
                         customer['phone'] = new_phone
@@ -1154,7 +1154,7 @@ def manage_customers():
     
     # Export customers
     st.markdown("---")
-    if st.button("📊 Export Customer List"):
+    if st.button("Export Customer List"):
         df = pd.DataFrame([
             {
                 'Name': customer['name'],
@@ -1336,7 +1336,7 @@ def manage_unallocated_balances():
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    if st.button(f"📋 Create Credit Note", key=f"credit_{customer_id}"):
+                    if st.button(f"Create Credit Note", key=f"credit_{customer_id}"):
                         st.info("Credit note creation feature - to be implemented")
                 
                 with col2:
@@ -1345,7 +1345,7 @@ def manage_unallocated_balances():
     
     # Export unallocated balances
     st.markdown("---")
-    if st.button("📊 Export Unallocated Balances"):
+    if st.button("Export Unallocated Balances"):
         export_data = []
         for customer_id, balance_data in customers_with_balance.items():
             export_data.append({
