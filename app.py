@@ -937,14 +937,14 @@ def main():
         
         # Navigation buttons with Flaticon uicons
         pages = [
-            ("Dashboard", "fi-tr-apps"),
+            ("Dashboard", "fi-tr-dashboard"),
             ("Quotations", "fi-tr-file-invoice"), 
             ("Bookings", "fi-tr-calendar-check"),
-            ("Invoicing", "fi-tr-receipt"),
+            ("Invoicing", "fi-tr-file-invoice-dollar"),
             ("Customer Payments", "fi-tr-hand-holding-usd"),
             ("Vendor Management", "fi-tr-users-alt"),
             ("Company Expenses", "fi-tr-sack-dollar"),
-            ("Vehicle Master", "fi-tr-truck-side"),
+            ("Vehicle Master", "fi-tr-shipping-fast"),
             ("Pricing Management", "fi-tr-tags"),
             ("Notes & Tracking", "fi-tr-comment-alt-dots"),
             ("Audit Exports", "fi-tr-file-export")

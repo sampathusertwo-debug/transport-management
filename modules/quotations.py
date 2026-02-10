@@ -324,9 +324,9 @@ def create_quotation():
                 if selected_vendor == "➕ Add New Vendor":
                     vendor_name = st.text_input("Enter Vendor Name", key="quotation_new_vendor_name", placeholder="e.g., ABC Transport Services")
                     if vendor_name:
-                        st.info(f"New vendor '{vendor_name}' will be added when you create the quotation.")
+                        st.info(f"Vendor '{vendor_name}' will be saved with this quotation only (not added to vendor master).")
                 
-                st.info(f"New vehicle '{vehicle_reg_no}' will be added when you create the quotation.")
+                st.info(f"⚠️ Vehicle '{vehicle_reg_no}' will be saved with this quotation only (NOT added to vehicle master).")
             linked_driver_name = ""
         
         # Driver selection
@@ -342,7 +342,7 @@ def create_quotation():
             if selected_driver == "➕ Add New Driver":
                 driver = st.text_input("Enter New Driver Name", key="quotation_new_driver_name", placeholder="e.g., Ravi Kumar")
                 if driver:
-                    st.info(f"New driver '{driver}' will be added when you create the quotation.")
+                    st.info(f"⚠️ Driver '{driver}' will be saved with this quotation only (NOT added to driver master).")
                 driver_phone_from_master = ""
             else:
                 driver = selected_driver
@@ -355,7 +355,7 @@ def create_quotation():
             
             driver = st.text_input("Enter New Driver Name", key="quotation_new_driver_name", placeholder="e.g., Ravi Kumar")
             if driver:
-                st.info(f"New driver '{driver}' will be added when you create the quotation.")
+                st.info(f"⚠️ Driver '{driver}' will be saved with this quotation only (NOT added to driver master).")
             driver_phone_from_master = ""
     
     with col2:
@@ -490,8 +490,9 @@ def create_quotation():
                     refresh_data('customers')
                     load_data_when_needed('customers')
         
-        # Note: Vehicle registration, driver, and vendor are saved in quotation details only
-        # They are NOT automatically added to the master records
+        # IMPORTANT: Vehicle registration, driver, and vendor are saved in quotation details only
+        # They are NOT automatically added to the master records (vehicles/drivers/vendors tables)
+        # This is intentional - master records should be added via Vehicle Master or Vendor Management modules
         
         # Create quotation data
         from database import normalize_vehicle_type
@@ -529,7 +530,7 @@ def create_quotation():
                     record_type='quotation',
                     old_status=None,
                     new_status='CREATED',
-                    changed_by=st.session_state.get('user', 'System'),
+                    changed_by=st.session_state.get('user_full_name', st.session_state.get('username', 'System')),
                     notes=f"Quotation created - {quotation_data['customer']}",
                     additional_data={
                         'quotation_number': quotation_number,
@@ -845,7 +846,7 @@ def edit_quotation():
                         record_type='quotation',
                         old_status=quotation.get('status'),
                         new_status=quotation.get('status'),
-                        changed_by=st.session_state.get('user', 'System'),
+                        changed_by=st.session_state.get('user_full_name', st.session_state.get('username', 'System')),
                         notes=f"Quotation updated - {customer}",
                         additional_data={
                             'quotation_number': quotation['quotation_number'],
@@ -874,7 +875,7 @@ def edit_quotation():
                 record_type='quotation',
                 old_status=quotation.get('status'),
                 new_status=quotation.get('status'),
-                changed_by=st.session_state.get('user', 'System'),
+                changed_by=st.session_state.get('user_full_name', st.session_state.get('username', 'System')),
                 notes=f"Edit cancelled for quotation {quotation['quotation_number']}"
             )
             del st.session_state['editing_quotation_id']
@@ -897,7 +898,7 @@ def edit_quotation():
                     record_type='quotation',
                     old_status=quotation.get('status'),
                     new_status='DELETED',
-                    changed_by=st.session_state.get('user', 'System'),
+                    changed_by=st.session_state.get('user_full_name', st.session_state.get('username', 'System')),
                     notes=f"Quotation deleted - {quotation['quotation_number']}"
                 )
                 
