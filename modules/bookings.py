@@ -405,7 +405,6 @@ def create_booking():
             else:
                 # Create new customer
                 from database import add_to_database
-                import uuid
                 new_customer_data = {
                     'id': str(uuid.uuid4()),
                     'name': customer.title(),
